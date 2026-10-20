@@ -1,6 +1,18 @@
 # SocialAtlas
 
-A hosted application using Next.js App Router conventions through Vinext for finding publicly indexed social profiles. TypeScript, Tailwind CSS, Motion for React, Lucide and Simple Icons.
+A white, responsive website for discovering social accounts recorded for public figures. Built with TypeScript, Next.js App Router conventions through Vinext, Motion and bundled platform icons.
+
+## Free search
+
+**Wikidata is the default. No API key or paid search subscription is required.**
+
+Enter a public figure's name or creator alias. SocialAtlas searches Wikidata, then reads the social-account claims on up to five matching entries. If several entries match, choose one; accounts from separate identities are never combined automatically.
+
+This is a public knowledge-base lookup, not a universal username search. Many people and accounts are absent. Community records may be incomplete, outdated or incorrect. An empty result does not prove someone has no accounts. Results are labelled **Wikidata record**, link to the original entry and do not claim verified ownership.
+
+The app supports recorded Twitch, YouTube, Instagram, TikTok, X, Kick, Facebook, Reddit, Threads, Snapchat and Discord links. It skips deprecated and end-dated claims, unsafe identifiers and non-profile URLs. YouTube handles are preferred over channel IDs to avoid displaying both forms of the same channel. Discord links require a recorded invite code; numeric server IDs alone are not usable invites.
+
+Sources: [Wikidata data access](https://www.wikidata.org/wiki/Wikidata:Data_access), [CC0 structured data](https://www.wikidata.org/wiki/Wikidata:Licensing), [API etiquette](https://www.mediawiki.org/wiki/API:Etiquette).
 
 ## Run
 
@@ -8,69 +20,51 @@ Requires Node.js 22.13 or newer and npm.
 
 ```powershell
 npm install
-Copy-Item .env.example .env.local
-# Set BRAVE_SEARCH_API_KEY in .env.local, then:
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. Restart the server after changing environment variables.
-
-For a production build:
+Open http://127.0.0.1:5173. No environment file is needed for the free default.
 
 ```powershell
-npx tsc --noEmit
-node --import tsx --test tests/*.test.ts
+npm run typecheck
+npm test
 npm run build
 npm start
 ```
 
-## Real search configuration
+For optional settings, copy `.env.example` to `.env.local` and restart the server after changes.
 
-Obtain a Web Search API key from [Brave Search API](https://brave.com/search/api/). Configure `BRAVE_SEARCH_API_KEY` on the server only. Do not use a `NEXT_PUBLIC_` variable. The server calls the [documented Web Search endpoint](https://api-dashboard.search.brave.com/api-reference/web/search/get) using `X-Subscription-Token`.
+## Provider settings
 
-Each uncached search makes two sequential provider calls covering eleven platforms. Your provider subscription, quota, indexing coverage and terms determine available results. No key is bundled. Missing credentials return HTTP 503 with `NOT_CONFIGURED`; failed providers and rate limits get explicit error states. No synthetic results or fallback account arrays are served.
+- `SEARCH_PROVIDER=wikidata` is the default even when a Brave key exists. There is no automatic paid fallback.
+- `WIKIDATA_CACHE_TTL_SECONDS=600` caches free results for ten minutes by default. Set zero to disable. The cache is process-local, bounded to 100 entries and a maximum TTL of one hour.
+- Optional `SEARCH_PROVIDER=brave` explicitly selects [Brave Web Search](https://brave.com/search/api/). It requires a server-only `BRAVE_SEARCH_API_KEY`; your provider plan determines costs and coverage. Never use a `NEXT_PUBLIC_` variable for secrets.
+- `SEARCH_CACHE_TTL_SECONDS=0` is the Brave cache default. Enable only when your Brave subscription allows storing results.
 
-`SEARCH_CACHE_TTL_SECONDS` enables a bounded, process-local cache (maximum 100 queries, TTL up to 3600 seconds). It defaults to zero because search-result storage must be permitted by your provider plan. Concurrent identical requests are deduplicated even with the cache disabled. Restarting clears the cache.
+A free lookup makes one name search plus one batched details request when entries match. Requests identify this app, use a timeout and `maxlag`, deduplicate concurrent identical queries, and honor rate-limit cooldowns. Upstream failures are displayed as errors, not empty results or fabricated accounts. The server allows 30 searches per minute per process; upstream quotas and availability still apply. Multi-instance deployments need shared rate limiting if used at larger scale.
 
-## Evidence and identity
+## Evidence and privacy
 
-- Only recognized HTTPS profile paths are accepted. Video/post links, unsafe schemes and lookalike domains are excluded.
-- An exact normalized username match is labelled **Strong match**, not verified ownership.
-- Other indexed candidates are **Possible match** and require review.
-- This version does not independently fetch official websites or authenticated platform data. It therefore does not claim **Officially linked**, platform verification, follower counts, profile portraits, biography or category. Search titles are displayed as search titles.
-- All results require the user to choose the accounts they recognize before building a constellation. A single account per platform may be selected. Duplicate platform candidates trigger an ambiguity notice. A user's choice is not a verification claim.
-- Cross-link corroboration and official platform API enrichment are not implemented. Do not treat same-name accounts as proof of a shared identity.
+Select the accounts you recognize before building the constellation. Several accounts on one platform can be selected. This selection is a personal collection, not a verification claim. Optional Brave results use **Strong match** for an exact username and **Possible match** otherwise; neither establishes ownership.
 
-## Features and privacy
+Only allowlisted social claims, entry names and public descriptions are returned. No portraits, follower counts, private data or platform verification badges are invented. The name and description come from the displayed Wikidata entry.
 
-Keyboard-accessible search, locally sourced recent-search suggestions, favorites, shareable `/?q=...` URLs, platform filters, selectable account collections and clickable constellation nodes. Share links rerun the query; they do not persist a verified identity or account selection. Favorites store search names, not snapshots of provider data. Search history (8 entries) and favorites (20 entries) are saved only in browser local storage. No analytics are included.
-
-Queries are sent to the server and Brave. API keys stay server-side. No arbitrary target-site fetching, private scraping or authentication bypass is performed. A conservative process-wide limiter permits 30 searches per minute; use a shared gateway rate limiter and an appropriate cost/quota policy before a multi-instance public deployment. In-memory caches and limits are per process.
-
-Live provider autocomplete is not enabled. Suggestions are explicitly labelled recent searches.
+Queries go to this server and the selected provider. No arbitrary target-site fetching, login bypass or private scraping is performed. Recent searches (8) and saved searches (20) stay in this browser's local storage. Saved searches contain query names, not account snapshots. Share links include the query and rerun the search; identity/account selections are not persisted. There is no analytics code. In-memory caches clear when the server restarts.
 
 ## Validation
 
-`node --import tsx --test tests/*.test.ts` uses isolated, explicitly named test fixtures to verify URL safety, canonicalization, ranking, deduplication, ambiguous candidates, empty results, credentials, upstream rate limits and network errors. Fixtures are never imported by the UI and are not served by the application.
+`npm test` checks URL safety, canonicalization, source attribution, ignored claims, YouTube deduplication, separate identities, the keyless default, request deduplication, cache behavior, empty results, malformed responses, rate limits and network errors. All mocked data is explicitly labelled test fixtures and is never served by the application.
 
-For the real journey: configure a valid key, search **Jynxzi**, inspect the returned source profiles, select accounts, build the constellation, open a node, save the search, and copy its link. Results depend on what Brave can find; they are not preloaded.
-
-Motion respects reduced-motion preferences. All principal actions support keyboard navigation. Browser storage and clipboard failures have explicit feedback. The interface adapts to mobile layouts and includes native focus-trapped information dialogs and application error/not-found pages.
-
-## Structure
-
-- `app/api/search/route.ts`: validated server endpoint, request limiter, sanitized errors
-- `lib/discovery.ts`: provider integration, profile URL allowlist, confidence ranking, cache
-- `components/atlas.tsx`: search, identity selection, constellation, saved/recent state
-- `components/platform-icon.tsx`: bundled brand SVGs from Simple Icons
-- `app/globals.css`: responsive visual system and reduced-motion styles
-
-Platform logos identify destinations and do not imply affiliation. The landing constellation is labelled as a map of possibilities; it contains platform symbols, not discovered accounts.
-
+For a live check, search **Jynxzi**, inspect the source records, select profiles, build the constellation, filter by platform, save the search and copy its link. Results come from the public API, not a bundled result list. Keyboard navigation, reduced motion, mobile layouts, native dialogs, and storage/clipboard error feedback are included.
 
 ## Hosted website
 
-SocialAtlas uses a white interface. The deployment adapter in `vite.config.ts` and `worker/index.ts` supports Cloudflare Workers through Sites. The live deployment URL is https://socialatlas-nicklas.cherry-snow-6346.chatgpt.site. Sites controls access; the initial publication is private to the owner. Set the hosted `BRAVE_SEARCH_API_KEY` as a runtime secret through Sites, never in source or client code. The server does not return fabricated results when the key is missing.
+[Open SocialAtlas](https://socialatlas-nicklas.cherry-snow-6346.chatgpt.site).
 
-GitHub stores the source; pushing to GitHub alone does not redeploy Sites. Build with `npm run build` and publish through the Sites workflow. GitHub Pages cannot run this application's server API.
+The existing Sites deployment is owner-private and requires the owner's sign-in. The free search method does not change hosting access or hosting-plan terms. No search secret is needed for the default provider.
 
+The Cloudflare Worker adapter is in `vite.config.ts` and `worker/index.ts`. Pushing source to GitHub alone does not redeploy Sites; build and publish through the Sites workflow. GitHub Pages cannot execute this server API.
+
+Key files: `lib/discovery.ts` handles providers and evidence; `app/api/search/route.ts` validates queries and limits requests; `components/atlas.tsx` provides discovery and selection; `app/globals.css` and `app/light.css` style the interface.
+
+Platform logos identify destinations and do not imply affiliation. The landing constellation is decorative and shows supported platforms, not discovered accounts.

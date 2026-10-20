@@ -101,3 +101,18 @@ dialog::backdrop { background: #4c39564d; }
 .privacy-note svg { color: #9d79b3; }
 .toast { color: #76538b; background: #faf4ff; border-color: #d8bce9; box-shadow: 0 10px 40px #9d7caa24; }
 .fatal button,.fatal a { color: #fff; background: #8c62b5; }
+.free-note { margin-top: 22px; color: #6551ad; font-size: 13px; font-weight: 600; line-height: 1.7; }
+.free-note span { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+.record-note { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 18px 0 24px; }
+.record-note a,.identity-card>a { display: inline-flex; gap: 6px; align-items: center; color: #6551ad; font-size: 13px; }
+.record-note p { color: var(--muted); font-size: 14px; margin-top: 8px; }
+.identity-picker { padding: 20px 0; }
+.identity-picker>p { color: var(--muted); margin: 12px 0 24px; line-height: 1.7; }
+.identity-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,270px),1fr)); gap: 18px; }
+.identity-card { display: flex; flex-direction: column; align-items: flex-start; gap: 15px; padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: #fdfbff; }
+.identity-card h3 { font-size: 21px; }
+.identity-card p { color: var(--muted); font-size: 14px; line-height: 1.7; flex: 1; }
+.identity-card>span:not(.eyebrow) { color: var(--muted); font-size: 12px; }
+.card-sources { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: auto; }
+.card-sources .source-link { margin-top: 0; }
+@media(max-width:600px) { .record-note { align-items: flex-start; flex-direction: column; } .free-note { padding: 0 14px; } }

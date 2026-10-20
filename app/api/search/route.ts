@@ -11,6 +11,6 @@ export async function GET(request: Request) {
   if (++limit.count > 30) return Response.json({ error: "Too many searches. Please wait a minute." }, { status: 429, headers: { "Retry-After": "60" } });
   try { return Response.json(await discover(query), { headers: { "Cache-Control": "no-store" } }); }
   catch (e) {
-    return Response.json({ error: e instanceof SearchError ? e.message : "Discovery is temporarily unavailable.", code: e instanceof SearchError ? e.code : "UNAVAILABLE" }, { status: e instanceof SearchError ? e.status : 500 });
+    return Response.json({ error: e instanceof SearchError ? e.message : "Discovery is temporarily unavailable.", code: e instanceof SearchError ? e.code : "UNAVAILABLE" }, { status: e instanceof SearchError ? e.status : 500, headers: { "Cache-Control": "no-store", ...(e instanceof SearchError && e.retryAfter ? { "Retry-After": String(e.retryAfter) } : {}) } });
   }
 }

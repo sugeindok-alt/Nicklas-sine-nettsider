@@ -12,14 +12,15 @@ export const platforms = [
   { id: "discord", name: "Discord", hosts: ["discord.gg", "discord.com"], color: "#8891ff" },
 ];
 export type Hit = { title: string; url: string; description?: string };
-export type Account = { platform: string; username: string; title: string; url: string; description: string; confidence: "Strong match" | "Possible match" | "Officially linked"; evidence: string };
-export type Discovery = { query: string; accounts: Account[]; searchedAt: string; cached?: boolean; ambiguous: boolean };
+export type Account = { platform: string; username: string; title: string; url: string; description: string; confidence: "Strong match" | "Possible match" | "Wikidata record"; evidence: string; sourceUrl?: string };
+export type Identity = { id: string; name: string; description: string; sourceUrl: string; accounts: Account[] };
+export type Discovery = { query: string; accounts: Account[]; searchedAt: string; cached?: boolean; ambiguous: boolean; provider: "wikidata" | "brave"; candidates?: Identity[]; identity?: Identity };
 const clean = (s: string) => s.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&");
 const normalize = (s: string) => s.toLowerCase().replace(/^@/, "").trim();
 export function parseProfile(raw: string): { platform: string; username: string; url: string } | null {
   try {
     const u = new URL(raw);
-    if (u.protocol !== "https:") return null;
+    if (u.protocol !== "https:" || u.username || u.password || u.port) return null;
     const host = u.hostname.toLowerCase().replace(/^(www|m)\./, "");
     const platform = platforms.find(p => p.hosts.includes(host));
     if (!platform) return null;
@@ -56,34 +57,121 @@ export function rankResults(query: string, hits: Hit[]): Account[] {
   return [...accounts.values()].sort((a, b) => Number(b.confidence === "Strong match") - Number(a.confidence === "Strong match"));
 }
 export class SearchError extends Error {
-  constructor(public code: string, message: string, public status: number) { super(message); }
+  constructor(public code: string, message: string, public status: number, public retryAfter?: number) { super(message); }
+}
+type Snak = { snaktype?: string; datavalue?: { value?: unknown } };
+type Claim = { rank?: string; mainsnak?: Snak; qualifiers?: Record<string, Snak[]> };
+type Entity = { id?: string; labels?: Record<string, { value?: string }>; descriptions?: Record<string, { value?: string }>; claims?: Record<string, Claim[]> };
+const socialProperties = [
+  ["P5797", "https://twitch.tv/"], ["P11245", "https://youtube.com/@"],
+  ["P2397", "https://youtube.com/channel/"], ["P2003", "https://instagram.com/"],
+  ["P7085", "https://tiktok.com/@"], ["P2002", "https://x.com/"],
+  ["P13863", "https://kick.com/"], ["P2013", "https://facebook.com/"],
+  ["P4265", "https://reddit.com/user/"], ["P11892", "https://threads.net/@"],
+  ["P2984", "https://snapchat.com/add/"], ["P9078", "https://discord.gg/"],
+] as const;
+function identifier(snak?: Snak) {
+  const value = snak?.datavalue?.value;
+  return snak?.snaktype === "value" && typeof value === "string" && /^@?[\w.-]{1,100}$/.test(value) ? value.replace(/^@/, "") : null;
+}
+export function identityFromEntity(entity: Entity): Identity | null {
+  if (!entity.id || !/^Q[1-9]\d*$/.test(entity.id)) return null;
+  const sourceUrl = `https://www.wikidata.org/wiki/${entity.id}`;
+  const name = entity.labels?.en?.value || entity.id;
+  const description = entity.descriptions?.en?.value || "";
+  const accounts = new Map<string, Account>();
+  for (const [property, prefix] of socialProperties) {
+    if (property === "P2397" && [...accounts.values()].some(a => a.platform === "youtube")) continue;
+    const claims = property === "P9078" ? [...(entity.claims?.P9078 || []), ...(entity.claims?.P9345 || []).flatMap(c => (c.qualifiers?.P9078 || []).map(snak => ({ ...c, mainsnak: snak })))] : entity.claims?.[property] || [];
+    for (const claim of claims) {
+      if (claim.rank === "deprecated" || claim.qualifiers?.P582?.length) continue;
+      const value = identifier(claim.mainsnak);
+      if (!value) continue;
+      const parsed = parseProfile(`${prefix}${value}`);
+      if (!parsed || accounts.has(parsed.url)) continue;
+      accounts.set(parsed.url, { ...parsed, title: name, description: "", confidence: "Wikidata record", evidence: "Listed on this Wikidata entry. Community-maintained data; ownership is not independently verified.", sourceUrl: `${sourceUrl}#${property === "P9078" ? "P9345" : property}` });
+    }
+  }
+  return { id: entity.id, name, description, sourceUrl, accounts: [...accounts.values()] };
+}
+let wikidataCooldown = 0;
+async function wikidataRequest(params: Record<string, string>) {
+  if (wikidataCooldown > Date.now()) throw new SearchError("RATE_LIMITED", "Wikidata is busy. Please try again shortly.", 429, Math.ceil((wikidataCooldown - Date.now()) / 1000));
+  const url = new URL("https://www.wikidata.org/w/api.php");
+  url.search = new URLSearchParams({ ...params, format: "json", maxlag: "5" }).toString();
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "SocialAtlas/1.0 (https://github.com/sugeindok-alt/Nicklas-sine-nettsider)" }, signal: AbortSignal.timeout(12000), cache: "no-store" });
+  } catch { throw new SearchError("UNAVAILABLE", "The free Wikidata service could not be reached. Please try again shortly.", 502); }
+  const retryHeader = response.headers.get("Retry-After");
+  const retrySeconds = retryHeader ? (Number(retryHeader) || (Date.parse(retryHeader) - Date.now()) / 1000) : 60;
+  if (response.status === 429 || response.status === 503) {
+    const delay = Number.isFinite(retrySeconds) ? Math.max(1, Math.ceil(retrySeconds)) : 60;
+    wikidataCooldown = Date.now() + delay * 1000;
+    throw new SearchError("RATE_LIMITED", "Wikidata is busy. Please try again shortly.", 429, delay);
+  }
+  if (!response.ok) throw new SearchError("PROVIDER_ERROR", "Wikidata could not complete this search. Please try again later.", 502);
+  let data: { search?: { id?: string }[]; entities?: Record<string, Entity>; error?: { code?: string } };
+  try { data = await response.json() as typeof data; }
+  catch { throw new SearchError("PROVIDER_ERROR", "Wikidata returned an unreadable response. Please try again later.", 502); }
+  if (!data || typeof data !== "object") throw new SearchError("PROVIDER_ERROR", "Wikidata returned an incomplete response.", 502);
+  if (data.error) {
+    if (data.error.code === "maxlag" || data.error.code === "ratelimited") {
+      wikidataCooldown = Date.now() + 60000;
+      throw new SearchError("RATE_LIMITED", "Wikidata is busy. Please try again in a minute.", 429, 60);
+    }
+    throw new SearchError("PROVIDER_ERROR", "Wikidata could not complete this search.", 502);
+  }
+  return data;
+}
+async function discoverWikidata(query: string): Promise<Discovery> {
+  const found = await wikidataRequest({ action: "wbsearchentities", search: query, language: "en", uselang: "en", type: "item", limit: "5" });
+  if (!Array.isArray(found.search)) throw new SearchError("PROVIDER_ERROR", "Wikidata returned an incomplete search response.", 502);
+  const ids = [...new Set(found.search.flatMap(item => item?.id && /^Q[1-9]\d*$/.test(item.id) ? [item.id] : []))].slice(0, 5);
+  const candidates: Identity[] = [];
+  if (ids.length) {
+    const details = await wikidataRequest({ action: "wbgetentities", ids: ids.join("|"), props: "claims|labels|descriptions", languages: "en" });
+    if (!details.entities || typeof details.entities !== "object") throw new SearchError("PROVIDER_ERROR", "Wikidata returned incomplete account records.", 502);
+    for (const id of ids) {
+      const entity = details.entities[id];
+      const identity = entity?.id === id ? identityFromEntity(entity) : null;
+      if (identity) candidates.push(identity);
+    }
+  }
+  const identity = candidates.length === 1 ? candidates[0] : undefined;
+  return { query, provider: "wikidata", accounts: identity?.accounts || [], identity, candidates, ambiguous: candidates.length > 1, searchedAt: new Date().toISOString() };
+}
+async function discoverBrave(query: string): Promise<Discovery> {
+  const key = process.env.BRAVE_SEARCH_API_KEY;
+  if (!key) throw new SearchError("NOT_CONFIGURED", "Optional Brave search needs an API key. The site owner can switch SEARCH_PROVIDER to wikidata for free discovery.", 503);
+  const hits: Hit[] = [];
+  for (const group of [platforms.slice(0, 5), platforms.slice(5)]) {
+    const url = new URL("https://api.search.brave.com/res/v1/web/search");
+    url.searchParams.set("q", `"${query.replace(/["\\]/g, "")}" (${group.flatMap(p => p.hosts.map(h => `site:${h}`)).join(" OR ")})`);
+    url.searchParams.set("count", "20");
+    let response: Response;
+    try { response = await fetch(url, { headers: { "X-Subscription-Token": key, Accept: "application/json" }, signal: AbortSignal.timeout(12000), cache: "no-store" }); }
+    catch { throw new SearchError("UNAVAILABLE", "The search service could not be reached. Please try again shortly.", 502); }
+    if (!response.ok) throw new SearchError("PROVIDER_ERROR", response.status === 429 ? "The search provider is at its request limit. Please try again later." : "The search provider could not complete this request. Check the server’s API configuration.", response.status === 429 ? 429 : 502);
+    const data = await response.json() as { web?: { results?: Hit[] } };
+    for (const h of data.web?.results ?? []) if (typeof h.url === "string" && typeof h.title === "string") hits.push(h);
+  }
+  const accounts = rankResults(query, hits);
+  return { query, provider: "brave", accounts, searchedAt: new Date().toISOString(), ambiguous: accounts.some(a => accounts.filter(b => b.platform === a.platform).length > 1) };
 }
 const cache = new Map<string, { expires: number; result: Discovery }>();
 const inflight = new Map<string, Promise<Discovery>>();
 export async function discover(query: string): Promise<Discovery> {
-  const key = process.env.BRAVE_SEARCH_API_KEY;
-  if (!key) throw new SearchError("NOT_CONFIGURED", "Live discovery isn’t connected yet. The site owner needs to configure the search provider.", 503);
-  const normalized = query.toLowerCase();
+  const provider = process.env.SEARCH_PROVIDER?.trim().toLowerCase() || "wikidata";
+  if (provider !== "wikidata" && provider !== "brave") throw new SearchError("NOT_CONFIGURED", "The search provider is invalid. Choose wikidata for free discovery.", 503);
+  const normalized = `${provider}:${query.toLowerCase()}`;
   const cached = cache.get(normalized);
   if (cached && cached.expires > Date.now()) return { ...cached.result, cached: true };
   if (inflight.has(normalized)) return inflight.get(normalized)!;
   const task = (async () => {
-    const hits: Hit[] = [];
-    for (const group of [platforms.slice(0, 5), platforms.slice(5)]) {
-      const url = new URL("https://api.search.brave.com/res/v1/web/search");
-      url.searchParams.set("q", `"${query.replace(/["\\]/g, "")}" (${group.flatMap(p => p.hosts.map(h => `site:${h}`)).join(" OR ")})`);
-      url.searchParams.set("count", "20");
-      let response: Response;
-      try { response = await fetch(url, { headers: { "X-Subscription-Token": key, Accept: "application/json" }, signal: AbortSignal.timeout(12000), cache: "no-store" }); }
-      catch { throw new SearchError("UNAVAILABLE", "The search service could not be reached. Please try again shortly.", 502); }
-      if (!response.ok) throw new SearchError("PROVIDER_ERROR", response.status === 429 ? "The search provider is at its request limit. Please try again later." : "The search provider could not complete this request. Check the server’s API configuration.", response.status === 429 ? 429 : 502);
-      const data = await response.json() as { web?: { results?: Hit[] } };
-      for (const h of data.web?.results ?? []) if (typeof h.url === "string" && typeof h.title === "string") hits.push(h);
-    }
-    const accounts = rankResults(query, hits);
-    const ambiguous = accounts.some(a => accounts.filter(b => b.platform === a.platform).length > 1);
-    const result: Discovery = { query, accounts, searchedAt: new Date().toISOString(), ambiguous };
-    const ttl = Math.min(3600, Math.max(0, Number(process.env.SEARCH_CACHE_TTL_SECONDS) || 0));
+    const result = await (provider === "wikidata" ? discoverWikidata(query) : discoverBrave(query));
+    const configuredTtl = Number(provider === "wikidata" ? process.env.WIKIDATA_CACHE_TTL_SECONDS ?? 600 : process.env.SEARCH_CACHE_TTL_SECONDS ?? 0);
+    const ttl = Number.isFinite(configuredTtl) ? Math.min(3600, Math.max(0, configuredTtl)) : 0;
     if (ttl) {
       if (cache.size >= 100) cache.delete(cache.keys().next().value!);
       cache.set(normalized, { expires: Date.now() + ttl * 1000, result });
