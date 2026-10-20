@@ -34,7 +34,7 @@ test("missing credentials return an explicit configuration error", async () => {
     await assert.rejects(discover("Jynxzi"), (e: unknown) => e instanceof SearchError && e.code === "NOT_CONFIGURED" && e.status === 503);
     const response = await GET(new Request("http://localhost/api/search?q=Jynxzi"));
     assert.equal(response.status, 503);
-    assert.equal((await response.json()).code, "NOT_CONFIGURED");
+    assert.equal((await response.json() as { code: string }).code, "NOT_CONFIGURED");
   } finally { if (previous) process.env.BRAVE_SEARCH_API_KEY = previous; }
 });
 test("route rejects invalid and excessive queries", async () => {
@@ -68,3 +68,4 @@ test("actual integration maps provider fixtures, detects ambiguity, handles empt
     await assert.rejects(discover("test network fixture"), (e: unknown) => e instanceof SearchError && e.code === "UNAVAILABLE");
   } finally { globalThis.fetch = originalFetch; if (previous) process.env.BRAVE_SEARCH_API_KEY = previous; else delete process.env.BRAVE_SEARCH_API_KEY; }
 });
+

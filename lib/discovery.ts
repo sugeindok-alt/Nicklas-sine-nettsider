@@ -77,7 +77,7 @@ export async function discover(query: string): Promise<Discovery> {
       try { response = await fetch(url, { headers: { "X-Subscription-Token": key, Accept: "application/json" }, signal: AbortSignal.timeout(12000), cache: "no-store" }); }
       catch { throw new SearchError("UNAVAILABLE", "The search service could not be reached. Please try again shortly.", 502); }
       if (!response.ok) throw new SearchError("PROVIDER_ERROR", response.status === 429 ? "The search provider is at its request limit. Please try again later." : "The search provider could not complete this request. Check the server’s API configuration.", response.status === 429 ? 429 : 502);
-      const data = await response.json();
+      const data = await response.json() as { web?: { results?: Hit[] } };
       for (const h of data.web?.results ?? []) if (typeof h.url === "string" && typeof h.title === "string") hits.push(h);
     }
     const accounts = rankResults(query, hits);
@@ -93,3 +93,4 @@ export async function discover(query: string): Promise<Discovery> {
   inflight.set(normalized, task);
   try { return await task; } finally { inflight.delete(normalized); }
 }
+

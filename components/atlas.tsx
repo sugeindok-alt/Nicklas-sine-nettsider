@@ -74,7 +74,7 @@ export default function Atlas() {
     setRecent(next); persist("atlas-recent", next);
     try {
       const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: controller.current.signal });
-      const data = await response.json();
+      const data = await response.json() as Discovery & { error?: string; code?: string };
       if (id !== requestId.current) return;
       if (!response.ok) setError({ message: data.error || "Something interrupted discovery.", code: data.code });
       else setResult(data);
@@ -125,5 +125,6 @@ export default function Atlas() {
     <AnimatePresence>{toast && <motion.div className="toast" role="status" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}><Check size={16} />{toast}</motion.div>}</AnimatePresence>
   </div></MotionConfig>;
 }
+
 
 
