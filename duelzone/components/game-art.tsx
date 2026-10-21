@@ -29,7 +29,7 @@ export default function GameArt({
 }) {
   return (
     <div
-      className={`game-art art-${game} ${large ? "large" : ""}`}
+      className={`game-art art-${game === "grid" ? "gridrush" : game} ${large ? "large" : ""}`}
       aria-hidden="true"
     >
       <div className="art-grid" />
