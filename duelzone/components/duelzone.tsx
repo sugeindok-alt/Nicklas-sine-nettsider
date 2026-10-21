@@ -38,6 +38,8 @@ import {
   GAME_INFO,
   RANKS,
   games,
+  featuredGames,
+  isCompetition,
   rankFor,
   type Game,
   type MatchState,
@@ -46,6 +48,8 @@ import {
 import { api } from "@/lib/client";
 import GameArt, { gameIcons } from "./game-art";
 import Modal from "./modal";
+import { ProgressionPanel } from "./progression";
+import type { Progression } from "@/lib/progression";
 import Arena, { Practice } from "./arena";
 
 type View =
@@ -67,6 +71,7 @@ type Overview = {
 };
 type BoardRow = Player & { rating: number; games: number; wins: number };
 type Profile = {
+  progression: Progression;
   player: Player;
   rating: { rating: number; games: number; wins: number };
   stats: { played: number; wins: number; draws: number; best: number };
@@ -130,7 +135,7 @@ export default function DuelZone() {
   const [profile, setProfile] = useState<Profile | null>(null),
     [ownProfile, setOwnProfile] = useState<Profile | null>(null),
     [profileId, setProfileId] = useState<string | null>(null);
-  const [game, setGame] = useState<Game>("reaction"),
+  const [game, setGame] = useState<Game>("dodge"),
     [mode, setMode] = useState<"ranked" | "casual">("ranked"),
     [practice, setPractice] = useState<Game | null>(null);
   const [auth, setAuth] = useState<"login" | "register" | null>(null),
@@ -733,8 +738,8 @@ export default function DuelZone() {
                     </div>
                     <button
                       className="hero-visual"
-                      onClick={() => setPractice("aim")}
-                      aria-label="Try the Aim Duel interactive preview"
+                      onClick={() => setPractice("clash")}
+                      aria-label="Try the Aim Clash interactive preview"
                     >
                       <div className="hero-orbit orbit-one" />
                       <div className="hero-orbit orbit-two" />
@@ -761,16 +766,22 @@ export default function DuelZone() {
                         ENTER THE ZONE
                         <ArrowUpRight size={16} />
                       </div>
-                      <span className="visual-index">01 — 04</span>
+                      <span className="visual-index">FIVE NEW DISCIPLINES</span>
                     </button>
                   </section>
+                  {ownProfile?.progression && (
+                    <ProgressionPanel
+                      progress={ownProfile.progression}
+                      compact
+                    />
+                  )}
                   <section className="game-section">
                     <div className="section-heading">
                       <div>
-                        <p className="eyebrow">FOUR WAYS TO FIND YOUR EDGE</p>
+                        <p className="eyebrow">NINE WAYS TO FIND YOUR EDGE</p>
                         <h2>
                           Choose your battleground
-                          <span className="count-badge">04</span>
+                          <span className="count-badge">09</span>
                         </h2>
                       </div>
                       <button
@@ -782,7 +793,10 @@ export default function DuelZone() {
                       </button>
                     </div>
                     <div className="game-grid">
-                      {games.map((g, i) => {
+                      {[
+                        ...featuredGames,
+                        ...games.filter((g) => !isCompetition(g)),
+                      ].map((g, i) => {
                         const Icon = gameIcons[g];
                         return (
                           <article
@@ -810,26 +824,14 @@ export default function DuelZone() {
                               <div className="game-meta">
                                 <Icon size={14} />
                                 <span>
-                                  {g === "reaction"
-                                    ? "REFLEXES"
-                                    : g === "aim"
-                                      ? "ACCURACY"
-                                      : g === "speed"
-                                        ? "DECISIONS"
-                                        : "TIMING"}
+                                  {isCompetition(g)
+                                    ? "NEW DISCIPLINE"
+                                    : "CLASSIC DUEL"}
                                 </span>
                                 <span>1V1</span>
                               </div>
                               <h3>{GAME_INFO[g].name}</h3>
-                              <p>
-                                {g === "reaction"
-                                  ? "The fastest instinct wins."
-                                  : g === "aim"
-                                    ? "Every shot is a statement."
-                                    : g === "speed"
-                                      ? "Outthink. Outpace. Outplay."
-                                      : "Control is your advantage."}
-                              </p>
+                              <p>{GAME_INFO[g].tag.toLowerCase()}</p>
                               <button
                                 className="game-select"
                                 onClick={() => setGame(g)}
@@ -860,8 +862,14 @@ export default function DuelZone() {
                     <div>
                       <strong>{GAME_INFO[game].name}</strong>
                       <span>
-                        {GAME_INFO[game].rounds} rounds ·{" "}
-                        {GAME_INFO[game].keys.toLowerCase()}
+                        {isCompetition(game)
+                          ? game === "arena"
+                            ? "6 stages"
+                            : game === "mind"
+                              ? "6 puzzles"
+                              : "45–60 seconds"
+                          : `${GAME_INFO[game].rounds} rounds`}{" "}
+                        · {GAME_INFO[game].keys.toLowerCase()}
                       </span>
                     </div>
                     <div className="mode-toggle" aria-label="Match type">
@@ -963,7 +971,7 @@ export default function DuelZone() {
                   <div className="arena-footer">
                     <span>BUILT FOR THE COMPETITIVE SPIRIT.</span>
                     <div>
-                      <span>4 skill games</span>
+                      <span>9 skill games</span>
                       <i />
                       <span>Real opponents</span>
                       <i />
@@ -1256,6 +1264,9 @@ export default function DuelZone() {
                           </button>
                         )}
                       </div>
+                      {profile.progression && (
+                        <ProgressionPanel progress={profile.progression} />
+                      )}
                       <div className="stat-grid">
                         {[
                           {

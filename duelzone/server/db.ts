@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { elo, seasonAt, type Player, type MatchState } from "../lib/shared";
+import { awardProgress, getProgress } from "./progression";
 
 export interface SQL {
   query<T = Record<string, unknown>>(
@@ -18,7 +19,13 @@ export class Database implements SQL {
     url = process.env.DATABASE_URL,
     directory = process.env.DATA_DIR || resolve(".data/postgres"),
   ) {
-    if (url) this.pool = new pg.Pool({ connectionString: url, max: 8 });
+    if (url)
+      this.pool = new pg.Pool({
+        connectionString: url,
+        max: 5,
+        idleTimeoutMillis: 15000,
+        connectionTimeoutMillis: 15000,
+      });
     else {
       if (directory !== "memory://") mkdirSync(directory, { recursive: true });
       this.embedded = new PGlite(directory);
@@ -66,6 +73,11 @@ export class Database implements SQL {
     CREATE TABLE IF NOT EXISTS tournaments(id TEXT PRIMARY KEY,name TEXT NOT NULL,game TEXT NOT NULL,host_id TEXT REFERENCES users(id),status TEXT NOT NULL DEFAULT 'open',winner_id TEXT REFERENCES users(id),created_at TIMESTAMPTZ NOT NULL DEFAULT now());
     CREATE TABLE IF NOT EXISTS entrants(tournament_id TEXT REFERENCES tournaments(id),user_id TEXT REFERENCES users(id),joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(tournament_id,user_id));
     CREATE TABLE IF NOT EXISTS fixtures(tournament_id TEXT REFERENCES tournaments(id),round INTEGER NOT NULL,slot INTEGER NOT NULL,match_id TEXT REFERENCES matches(id),player_a TEXT REFERENCES users(id),player_b TEXT REFERENCES users(id),winner_id TEXT REFERENCES users(id),PRIMARY KEY(tournament_id,round,slot));
+    CREATE TABLE IF NOT EXISTS progression(user_id TEXT PRIMARY KEY REFERENCES users(id),xp INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS achievements(user_id TEXT REFERENCES users(id),id TEXT NOT NULL,earned_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(user_id,id));
+    CREATE TABLE IF NOT EXISTS daily_rewards(user_id TEXT REFERENCES users(id),day TEXT NOT NULL,goal TEXT NOT NULL,PRIMARY KEY(user_id,day,goal));
+    CREATE TABLE IF NOT EXISTS reward_events(match_id TEXT REFERENCES matches(id),user_id TEXT REFERENCES users(id),day TEXT NOT NULL,PRIMARY KEY(match_id,user_id));
+    CREATE INDEX IF NOT EXISTS reward_day ON reward_events(user_id,day);
     `;
     for (const statement of schema.split(";").filter((s) => s.trim()))
       await this.query(statement);
@@ -159,6 +171,7 @@ export class Database implements SQL {
           "UPDATE results SET score=$1,rating_change=$2 WHERE match_id=$3 AND user_id=$4",
           [state.scores[p.id], changes[p.id] || 0, state.id, p.id],
         );
+      state.rewards = await awardProgress(tx, state);
       return changes;
     });
   }
@@ -190,7 +203,14 @@ export class Database implements SQL {
         [id],
       )
     ).rows;
-    return { player, rating, history, stats, records };
+    return {
+      player,
+      rating,
+      history,
+      stats,
+      records,
+      progression: await getProgress(this, id),
+    };
   }
   async tournaments() {
     const list = (

@@ -25,9 +25,37 @@ const production =
   process.env.NODE_ENV === "production";
 if (production) Object.assign(process.env, { NODE_ENV: "production" });
 const port = Number(process.env.PORT || 3000);
-const origin = process.env.APP_ORIGIN || `http://localhost:${port}`;
+const origin =
+  process.env.APP_ORIGIN ||
+  process.env.RENDER_EXTERNAL_URL ||
+  (process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:${port}`);
+const allowedOrigins = [
+  ...new Set([
+    origin,
+    ...(process.env.EXTRA_ORIGINS || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ]),
+];
 if (production && !origin.startsWith("https://"))
   throw new Error("Production requires an HTTPS APP_ORIGIN.");
+if (
+  production &&
+  allowedOrigins.some(
+    (value) => !value.startsWith("https://") || new URL(value).origin !== value,
+  )
+)
+  throw new Error("Every production origin must be an exact HTTPS origin.");
+if (
+  (process.env.RENDER || process.env.RAILWAY_ENVIRONMENT_ID) &&
+  !process.env.DATABASE_URL
+)
+  throw new Error(
+    "Cloud hosting requires a persistent DATABASE_URL. Local ephemeral storage is not allowed.",
+  );
 const db = new Database();
 await db.init();
 const app = express();
@@ -35,7 +63,7 @@ app.disable("x-powered-by");
 if (process.env.TRUST_PROXY_HOPS)
   app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS));
 const http = createServer(app);
-const live = realtime(http, db, origin);
+const live = realtime(http, db, allowedOrigins);
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -59,7 +87,7 @@ app.use(
     res.setHeader("Cache-Control", "no-store");
     if (
       !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
-      req.headers.origin !== origin
+      !allowedOrigins.includes(req.headers.origin || "")
     ) {
       res.status(403).json({ error: "Request origin rejected." });
       return;
@@ -339,11 +367,9 @@ const errors: ErrorRequestHandler = (error, _req, res, _next) => {
     return;
   }
   console.error(error);
-  res
-    .status(500)
-    .json({
-      error: "The server could not complete this request. Please try again.",
-    });
+  res.status(500).json({
+    error: "The server could not complete this request. Please try again.",
+  });
 };
 app.use(errors);
 if (!process.argv.includes("--api-only")) {
@@ -375,4 +401,3 @@ process.on("SIGTERM", () => void stop());
 process.on("message", (message) => {
   if (message === "duelzone:stop") void stop();
 });
-

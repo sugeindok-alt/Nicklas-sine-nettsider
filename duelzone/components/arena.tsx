@@ -9,15 +9,21 @@ import {
   Target,
   Trophy,
   Zap,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   GAME_INFO,
   markerPosition,
+  isCompetition,
   type MatchState,
   type Game,
 } from "@/lib/shared";
 import type { Action } from "@/server/game";
+import { CompetitionField, CompetitionPractice } from "./competition-field";
+import { ACHIEVEMENTS } from "@/lib/progression";
+import { setSound, soundEnabled, tone, unlockSound } from "@/lib/sound";
 const inkColors: Record<string, string> = {
   BLUE: "#a5bce9",
   CORAL: "#e8b39a",
@@ -267,6 +273,15 @@ export default function Arena({
   connected: boolean;
 }) {
   const [confirm, setConfirm] = useState(false);
+  const [audio, setAudio] = useState(true);
+  const announced = useRef("");
+  useEffect(() => setAudio(soundEnabled()), []);
+  useEffect(() => {
+    if (state.phase === "finished" && announced.current !== state.id) {
+      announced.current = state.id;
+      tone(state.winner === userId ? "win" : "loss");
+    }
+  }, [state.phase, state.id, state.winner, userId]);
   const arenaRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -298,6 +313,18 @@ export default function Arena({
             <span className="muted">{GAME_INFO[state.game].name}</span>
           </div>
           <span className="mode-chip">{state.mode}</span>
+          <button
+            className="icon-button sound-toggle"
+            aria-label={audio ? "Mute sound" : "Enable sound"}
+            aria-pressed={audio}
+            onClick={() => {
+              setSound(!audio);
+              setAudio(!audio);
+              unlockSound();
+            }}
+          >
+            {audio ? <Volume2 size={18} /> : <VolumeX size={18} />}
+          </button>
           {finished ? (
             <button className="text-button" onClick={onClose}>
               Back to arena <ArrowRight size={16} />
@@ -363,7 +390,7 @@ export default function Arena({
         <AnimatePresence mode="wait">
           {finished ? (
             <motion.div
-              className="match-results"
+              className={`match-results ${won ? "victory" : tie ? "draw" : "defeat"}`}
               key="results"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -371,6 +398,16 @@ export default function Arena({
               <div className={`result-emblem ${won ? "won" : ""}`}>
                 <Trophy size={48} strokeWidth={1} />
               </div>
+              {won && (
+                <div className="victory-lines" aria-hidden="true">
+                  {Array.from({ length: 8 }, (_, i) => (
+                    <i
+                      key={i}
+                      style={{ "--line-index": i } as React.CSSProperties}
+                    />
+                  ))}
+                </div>
+              )}
               <span className="eyebrow">
                 {state.reason === "Score" ? "MATCH COMPLETE" : state.reason}
               </span>
@@ -393,6 +430,24 @@ export default function Arena({
                   {(state.changes?.[userId] || 0) >= 0 ? "+" : ""}
                   {state.changes?.[userId] || 0}
                   <span>RATING POINTS</span>
+                </div>
+              )}
+              {state.rewards?.[userId] && (
+                <div className="earned-rewards">
+                  <strong>+{state.rewards[userId].xp} XP</strong>
+                  {state.rewards[userId].daily.length > 0 && (
+                    <span>
+                      {state.rewards[userId].daily.length} daily challenge
+                      {state.rewards[userId].daily.length > 1 ? "s" : ""}{" "}
+                      completed
+                    </span>
+                  )}
+                  {state.rewards[userId].achievements.map((id) => (
+                    <span className="achievement-earned" key={id}>
+                      <Trophy size={14} />
+                      {ACHIEVEMENTS.find((a) => a.id === id)?.name}
+                    </span>
+                  ))}
                 </div>
               )}
               <div className="result-actions">
@@ -431,7 +486,22 @@ export default function Arena({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <Playfield state={state} userId={userId} onAction={onAction} />
+              {state.competition ? (
+                <CompetitionField
+                  state={state}
+                  userId={userId}
+                  onAction={onAction}
+                />
+              ) : (
+                <Playfield
+                  state={state}
+                  userId={userId}
+                  onAction={(action) => {
+                    unlockSound();
+                    onAction(action);
+                  }}
+                />
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -451,7 +521,14 @@ export default function Arena({
   );
 }
 
-export function Practice({
+export function Practice(props: { game: Game; onClose: () => void }) {
+  return isCompetition(props.game) ? (
+    <CompetitionPractice {...props} />
+  ) : (
+    <ClassicPractice {...props} />
+  );
+}
+function ClassicPractice({
   game,
   onClose,
 }: {

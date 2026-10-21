@@ -1,10 +1,24 @@
-import { Crosshair, Zap, Gauge, ScanLine } from "lucide-react";
+import {
+  Crosshair,
+  Zap,
+  Gauge,
+  ScanLine,
+  Move,
+  Grid3X3,
+  Brain,
+  Swords,
+} from "lucide-react";
 import type { Game } from "@/lib/shared";
 export const gameIcons = {
   reaction: Zap,
   aim: Crosshair,
   speed: Gauge,
   precision: ScanLine,
+  dodge: Move,
+  grid: Grid3X3,
+  clash: Crosshair,
+  mind: Brain,
+  arena: Swords,
 };
 export default function GameArt({
   game,
@@ -19,6 +33,53 @@ export default function GameArt({
       aria-hidden="true"
     >
       <div className="art-grid" />
+      {game === "dodge" && (
+        <div className="dodge-art">
+          <span className="runner-mark" />
+          <span className="rival-mark" />
+          {Array.from({ length: 6 }, (_, i) => (
+            <i key={i} style={{ "--obstacle": i } as React.CSSProperties} />
+          ))}
+          <b>READ THE APPROACH</b>
+        </div>
+      )}
+      {game === "grid" && (
+        <div className="grid-art">
+          {Array.from({ length: 25 }, (_, i) => (
+            <i
+              key={i}
+              className={
+                i < 9 ? "side-one" : i > 17 ? "side-two" : i === 12 ? "hot" : ""
+              }
+            />
+          ))}
+        </div>
+      )}
+      {game === "clash" && (
+        <div className="clash-art">
+          <span />
+          <span />
+          <span />
+          <b>COMBO ×4</b>
+        </div>
+      )}
+      {game === "mind" && (
+        <div className="mind-art">
+          {Array.from({ length: 9 }, (_, i) => (
+            <i key={i} style={{ "--memory-index": i } as React.CSSProperties} />
+          ))}
+          <b>RECALL / REPEAT</b>
+        </div>
+      )}
+      {game === "arena" && (
+        <div className="arena-art">
+          <Move />
+          <Grid3X3 />
+          <Crosshair />
+          <Brain />
+          <b>ADAPT TO ANYTHING</b>
+        </div>
+      )}
       {game === "reaction" && (
         <>
           <div className="pulse-ring r1" />

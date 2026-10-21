@@ -240,44 +240,50 @@ try {
   await b.command("queue:leave");
   pass("Different games do not match and there are no fabricated opponents");
   await Promise.all(
-    games.map(async (game, i) => {
-      const p = people[i * 2],
-        q = people[i * 2 + 1];
-      const offP = p.autoPlay(150),
-        offQ = q.autoPlay(350);
-      await p.command("queue:join", {
-        game,
-        mode: i === 0 ? "ranked" : "casual",
-      });
-      await q.command("queue:join", {
-        game,
-        mode: i === 0 ? "ranked" : "casual",
-      });
-      const state = await p.state(
-        (s) => s.game === game && s.phase === "intro",
-      );
-      assert(
-        (await q.state((s) => s.id === state.id)).players.some(
-          (x) => x.id === p.user.id,
-        ),
-      );
-      p.socket.emit("action", { challengeId: randomUUID(), points: 999999 });
-      const result = await p.state(
-        (s) => s.id === state.id && s.phase === "finished",
-        90000,
-      );
-      const other = await q.state(
-        (s) => s.id === state.id && s.phase === "finished",
-      );
-      assert.deepEqual(result.scores, other.scores);
-      assert.equal(result.winner, p.user.id);
-      const profile = (await request(`/profile/${p.user.id}`)).data;
-      assert.equal(profile.stats.played, 1);
-      assert(profile.history[0].score < 10000);
-      offP();
-      offQ();
-      pass(`${game}: synchronized 1v1, authoritative scores and saved result`);
-    }),
+    games
+      .filter((game) =>
+        ["reaction", "aim", "speed", "precision"].includes(game),
+      )
+      .map(async (game, i) => {
+        const p = people[i * 2],
+          q = people[i * 2 + 1];
+        const offP = p.autoPlay(150),
+          offQ = q.autoPlay(350);
+        await p.command("queue:join", {
+          game,
+          mode: i === 0 ? "ranked" : "casual",
+        });
+        await q.command("queue:join", {
+          game,
+          mode: i === 0 ? "ranked" : "casual",
+        });
+        const state = await p.state(
+          (s) => s.game === game && s.phase === "intro",
+        );
+        assert(
+          (await q.state((s) => s.id === state.id)).players.some(
+            (x) => x.id === p.user.id,
+          ),
+        );
+        p.socket.emit("action", { challengeId: randomUUID(), points: 999999 });
+        const result = await p.state(
+          (s) => s.id === state.id && s.phase === "finished",
+          90000,
+        );
+        const other = await q.state(
+          (s) => s.id === state.id && s.phase === "finished",
+        );
+        assert.deepEqual(result.scores, other.scores);
+        assert.equal(result.winner, p.user.id);
+        const profile = (await request(`/profile/${p.user.id}`)).data;
+        assert.equal(profile.stats.played, 1);
+        assert(profile.history[0].score < 10000);
+        offP();
+        offQ();
+        pass(
+          `${game}: synchronized 1v1, authoritative scores and saved result`,
+        );
+      }),
   );
   const first = (await request(`/profile/${a.user.id}`)).data;
   assert.equal(first.rating.rating, 1016);

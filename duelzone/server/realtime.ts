@@ -2,18 +2,30 @@ import type { Server as HTTPServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { Server, type Socket } from "socket.io";
 import { z } from "zod";
-import { games, type Game, type Mode, type Player } from "../lib/shared";
+import {
+  games,
+  isCompetition,
+  type Game,
+  type Mode,
+  type Player,
+} from "../lib/shared";
 import { sessionPlayer } from "./auth";
 import { Database } from "./db";
 import { Match } from "./game";
+import { LiveMatch } from "./live-match";
 
 const gameSchema = z.enum(games);
-export function realtime(http: HTTPServer, db: Database, origin: string) {
+export function realtime(
+  http: HTTPServer,
+  db: Database,
+  origin: string | string[],
+) {
+  const origins = Array.isArray(origin) ? origin : [origin];
   const io = new Server(http, {
     maxHttpBufferSize: 8192,
     allowRequest: (req, callback) =>
-      callback(null, req.headers.origin === origin),
-    cors: { origin, credentials: true },
+      callback(null, origins.includes(req.headers.origin || "")),
+    cors: { origin: origins, credentials: true },
   });
   const sockets = new Map<string, Socket>();
   const queue = new Map<
@@ -47,7 +59,8 @@ export function realtime(http: HTTPServer, db: Database, origin: string) {
   ) {
     const people = await Promise.all(ids.map((id) => db.player(id)));
     if (people.some((p) => !p)) throw new Error("Player unavailable");
-    const match = new Match(
+    const MatchType = isCompetition(game) ? LiveMatch : Match;
+    const match = new MatchType(
       people as Player[],
       game,
       mode,
@@ -316,6 +329,12 @@ export function realtime(http: HTTPServer, db: Database, origin: string) {
           x: z.number().min(0).max(1).optional(),
           y: z.number().min(0).max(1).optional(),
           choice: z.number().int().min(0).max(3).optional(),
+          tile: z.number().int().min(0).max(48).optional(),
+          target: z.string().max(40).optional(),
+          puzzleId: z.string().max(40).optional(),
+          ability: z.boolean().optional(),
+          dx: z.number().min(-1).max(1).optional(),
+          dy: z.number().min(-1).max(1).optional(),
         })
         .safeParse(data);
       if (!result.success) return;

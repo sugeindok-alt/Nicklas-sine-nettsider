@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./competition.css";
 export const metadata: Metadata = {
   title: "DuelZone — Every millisecond matters.",
   description:
-    "Pure skill. Real opponents. Four fast, competitive 1v1 games. Find your edge on DuelZone.",
+    "Nine skill-based multiplayer games. Dodge, capture, aim and outthink your rival. Find your edge on DuelZone.",
   icons: { icon: "/favicon.svg" },
 };
 export default function RootLayout({

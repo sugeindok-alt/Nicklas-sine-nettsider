@@ -1,7 +1,77 @@
-export const games = ["reaction", "aim", "speed", "precision"] as const;
+import type { CompetitionView } from "./competition";
+export const games = [
+  "reaction",
+  "aim",
+  "speed",
+  "precision",
+  "dodge",
+  "grid",
+  "clash",
+  "mind",
+  "arena",
+] as const;
+export const featuredGames = [
+  "dodge",
+  "grid",
+  "clash",
+  "mind",
+  "arena",
+] as const;
+export const isCompetition = (game: string) =>
+  (featuredGames as readonly string[]).includes(game);
 export type Game = (typeof games)[number];
 export type Mode = "ranked" | "casual" | "friend" | "tournament";
 export const GAME_INFO = {
+  dodge: {
+    name: "Dodge Duel",
+    short: "Dodge",
+    tag: "OUTLAST YOUR RIVAL",
+    description:
+      "Move through a shared arena. Read incoming hazards, dash through danger and protect your three lives. Last player standing wins; survival points break a timed tie.",
+    rounds: 1,
+    color: "#c8f36a",
+    keys: "WASD / DRAG · SPACE TO DASH",
+  },
+  grid: {
+    name: "Grid Rush",
+    short: "Grid",
+    tag: "TAKE CONTROL",
+    description:
+      "Capture tiles beside your territory. Cut into rival ground, hold the rotating bonus tile and spend three energy to fortify your newest tile. Most territory and bonus points wins.",
+    rounds: 1,
+    color: "#a5bce9",
+    keys: "TAP ADJACENT TILES · SPACE TO FORTIFY",
+  },
+  clash: {
+    name: "Aim Clash",
+    short: "Clash",
+    tag: "BUILD YOUR COMBO",
+    description:
+      "Race for shared moving targets. Chain hits for multipliers, claim gold power targets for double points and avoid crossed-out decoys. Three energy activates focus: larger hit zones for three seconds.",
+    rounds: 1,
+    color: "#e8b39a",
+    keys: "POINT & CLICK · SPACE FOR FOCUS",
+  },
+  mind: {
+    name: "Mind Battle",
+    short: "Mind",
+    tag: "STAY ONE STEP AHEAD",
+    description:
+      "Remember growing sequences, complete number patterns and solve logic puzzles. Both players face the same challenge; accurate streaks and fast solutions win.",
+    rounds: 6,
+    color: "#c2b4df",
+    keys: "TAP TILES · 1–4 FOR ANSWERS",
+  },
+  arena: {
+    name: "Speed Arena",
+    short: "Arena",
+    tag: "ADAPT. THEN ATTACK.",
+    description:
+      "Six rapid stages switch between survival, territory, moving targets and mind challenges. Each stage awards up to 1,000 points. Adapt quickly and win the combined score.",
+    rounds: 6,
+    color: "#d7dce4",
+    keys: "ADAPT TO EACH STAGE",
+  },
   reaction: {
     name: "Reaction Duel",
     short: "Reaction",
@@ -89,6 +159,11 @@ export type MatchState = {
   reason?: string;
   changes?: Record<string, number>;
   rematch: string[];
+  competition?: CompetitionView;
+  rewards?: Record<
+    string,
+    { xp: number; achievements: string[]; daily: string[] }
+  >;
 };
 export function elo(a: number, b: number, result: number) {
   return Math.round(32 * (result - 1 / (1 + 10 ** ((b - a) / 400))));
