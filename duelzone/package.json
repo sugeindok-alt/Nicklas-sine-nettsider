@@ -14,6 +14,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:integration": "tsx tests/integration.ts",
     "test:live": "tsx tests/live-integration.ts",
+    "test:experience": "tsx tests/experience-integration.ts",
     "test:production": "node tests/production-smoke.mjs",
     "format": "prettier --write app components lib server tests"
   },

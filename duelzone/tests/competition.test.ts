@@ -15,7 +15,7 @@ test("Dodge clamps movement, expires stale input, and keeps dash on cooldown", (
   e.tick(10050);
   assert(p.x > 0.32 && p.x < 0.35);
   const x = p.x;
-  e.tick(10400);
+  e.tick(10600);
   assert.equal(p.x, x);
   e.action("a", { ability: true }, 10400);
   const ready = p.readyAt;

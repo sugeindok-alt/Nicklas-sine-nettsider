@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { Competition } from "../lib/competition";
 import { Match, type Action } from "./game";
+import { BotDriver, type Difficulty } from "../lib/bot";
 
 export class LiveMatch extends Match {
   private engine?: Competition;
@@ -9,6 +10,10 @@ export class LiveMatch extends Match {
   private stopped = false;
   private frame = 0;
   private stage = 1;
+  private bot?: BotDriver;
+  configureBot(id: string, difficulty: Difficulty) {
+    this.bot = new BotDriver(id, difficulty);
+  }
   start() {
     this.broadcast(this.snapshot());
     this.intro = setTimeout(() => {
@@ -28,6 +33,10 @@ export class LiveMatch extends Match {
   private step() {
     if (!this.engine || this.stopped) return;
     this.engine.tick(Date.now());
+    if (this.bot) {
+      const input = this.bot.think(this.engine.snapshot(), Date.now());
+      if (input) this.engine.action(this.bot.id, input, Date.now());
+    }
     const v = this.engine.view;
     if (this.stage !== v.stage) {
       this.stage = v.stage;

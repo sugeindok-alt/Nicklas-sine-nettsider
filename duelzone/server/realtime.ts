@@ -1,5 +1,5 @@
 import type { Server as HTTPServer } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { Server, type Socket } from "socket.io";
 import { z } from "zod";
 import {
@@ -13,6 +13,7 @@ import { sessionPlayer } from "./auth";
 import { Database } from "./db";
 import { Match } from "./game";
 import { LiveMatch } from "./live-match";
+import { difficulties, type Difficulty } from "../lib/bot";
 
 const gameSchema = z.enum(games);
 export function realtime(
@@ -30,7 +31,12 @@ export function realtime(
   const sockets = new Map<string, Socket>();
   const queue = new Map<
     string,
-    { game: Game; mode: "ranked" | "casual"; at: number; rating: number }
+    {
+      game: Game | "any";
+      mode: "ranked" | "casual";
+      at: number;
+      rating: number;
+    }
   >();
   const matches = new Map<string, Match>();
   const active = new Map<string, string>();
@@ -51,6 +57,16 @@ export function realtime(
     });
   const player = (id: string) =>
     sockets.get(id)?.data.player as Player | undefined;
+  function scheduleDisconnect(id: string, matchId: string) {
+    clearTimeout(disconnects.get(id));
+    const timer = setTimeout(() => {
+      disconnects.delete(id);
+      if (active.get(id) === matchId && !sockets.has(id))
+        void matches.get(matchId)?.finish(id);
+    }, 20000);
+    timer.unref();
+    disconnects.set(id, timer);
+  }
   async function createMatch(
     ids: string[],
     game: Game,
@@ -60,11 +76,30 @@ export function realtime(
     const people = await Promise.all(ids.map((id) => db.player(id)));
     if (people.some((p) => !p)) throw new Error("Player unavailable");
     const MatchType = isCompetition(game) ? LiveMatch : Match;
+    let lastPhase = "";
     const match = new MatchType(
       people as Player[],
       game,
       mode,
-      (state) => ids.forEach((id) => sockets.get(id)?.emit("match", state)),
+      (state) => {
+        const phase = `${state.phase}:${state.challenge?.id}`;
+        const frame =
+          state.phase === "active" && state.competition && lastPhase === phase;
+        for (const id of ids) {
+          const socket = sockets.get(id);
+          if (frame && socket?.handshake.auth.frames) {
+            socket.volatile.emit("frame", {
+              id: state.id,
+              serverNow: state.serverNow,
+              scores: state.scores,
+              competition: state.competition,
+              deadline: state.deadline,
+              round: state.round,
+            });
+          } else socket?.emit("match", state);
+        }
+        lastPhase = phase;
+      },
       (s) => db.finishMatch(s),
       async (m) => {
         for (const id of ids) active.delete(id);
@@ -82,8 +117,67 @@ export function realtime(
       for (const [code, i] of invites) if (i.host === id) invites.delete(code);
     }
     match.start();
+    for (const id of ids)
+      if (!sockets.has(id)) scheduleDisconnect(id, match.state.id);
     lobby();
     return match;
+  }
+  async function createAI(id: string, game: Game, difficulty: Difficulty) {
+    pairing.add(id);
+    try {
+      const human = await db.player(id);
+      if (!human || !sockets.has(id))
+        throw new Error("Connection unavailable.");
+      const bot: Player = {
+        id: `bot:${randomUUID()}`,
+        username: `DuelZone AI · ${difficulty}`,
+        accent: "#a5bce9",
+        bio: "",
+        bot: true,
+        difficulty,
+      };
+      let previous = "";
+      const match = new LiveMatch(
+        [human, bot],
+        game,
+        "ai",
+        (state) => {
+          const socket = sockets.get(id),
+            phase = `${state.phase}:${state.challenge?.id}`;
+          if (
+            state.phase === "active" &&
+            previous === phase &&
+            socket?.handshake.auth.frames
+          )
+            socket.volatile.emit("frame", {
+              id: state.id,
+              serverNow: state.serverNow,
+              scores: state.scores,
+              competition: state.competition,
+              deadline: state.deadline,
+              round: state.round,
+            });
+          else socket?.emit("match", state);
+          previous = phase;
+        },
+        async () => ({}),
+        async (m) => {
+          active.delete(id);
+          lobby();
+          setTimeout(() => matches.delete(m.state.id), 600000).unref();
+        },
+      );
+      match.configureBot(bot.id, difficulty);
+      queue.delete(id);
+      for (const [code, invite] of invites)
+        if (invite.host === id) invites.delete(code);
+      matches.set(match.state.id, match);
+      active.set(id, match.state.id);
+      match.start();
+      lobby();
+    } finally {
+      pairing.delete(id);
+    }
   }
   async function tryPair() {
     if (matching) return;
@@ -96,7 +190,7 @@ export function realtime(
             other !== id &&
             !pairing.has(other) &&
             sockets.has(other) &&
-            a.game === b.game &&
+            (a.game === "any" || b.game === "any" || a.game === b.game) &&
             a.mode === b.mode &&
             (a.mode === "casual" ||
               Math.abs(a.rating - b.rating) <=
@@ -108,14 +202,22 @@ export function realtime(
         pairing.add(id);
         pairing.add(other);
         try {
-          await createMatch([id, other], a.game, a.mode);
+          const game =
+            a.game === "any"
+              ? candidate[1].game === "any"
+                ? games[randomInt(games.length)]
+                : candidate[1].game
+              : a.game;
+          await createMatch([id, other], game, a.mode);
         } catch {
           for (const uid of [id, other]) {
             queue.delete(uid);
+            sockets.get(uid)?.emit("queue:cancelled");
             sockets
               .get(uid)
               ?.emit("notice", "Could not create the match. Please try again.");
           }
+          lobby();
         } finally {
           pairing.delete(id);
           pairing.delete(other);
@@ -184,12 +286,6 @@ export function realtime(
       "INSERT INTO fixtures(tournament_id,round,slot,match_id,player_a,player_b) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tournament_id,round,slot) DO UPDATE SET match_id=$4,winner_id=NULL",
       [tid, round, slot, match.state.id, ids[0], ids[1]],
     );
-    for (const id of ids)
-      if (!sockets.has(id))
-        disconnects.set(
-          id,
-          setTimeout(() => void match.finish(id), 20000),
-        );
   }
   io.use(async (socket, next) => {
     try {
@@ -229,6 +325,9 @@ export function realtime(
       next();
     });
     socket.on("error", () => {});
+    socket.on("clock", (ack) => {
+      if (typeof ack === "function") ack(Date.now());
+    });
     function event(name: string, fn: (data: unknown) => Promise<unknown>) {
       socket.on(name, async (data, ack) => {
         if (typeof ack !== "function") return;
@@ -263,9 +362,23 @@ export function realtime(
         }
       });
     }
+    event("ai:start", async (data) => {
+      const { game, difficulty } = z
+        .object({
+          game: gameSchema.refine(isCompetition),
+          difficulty: z.enum(difficulties),
+        })
+        .parse(data);
+      requireFree(p.id);
+      await createAI(p.id, game, difficulty);
+      return {};
+    });
     event("queue:join", async (data) => {
       const input = z
-        .object({ game: gameSchema, mode: z.enum(["ranked", "casual"]) })
+        .object({
+          game: z.union([gameSchema, z.literal("any")]),
+          mode: z.enum(["ranked", "casual"]),
+        })
         .parse(data);
       requireFree(p.id);
       const season = await db.currentSeason();
@@ -278,6 +391,8 @@ export function realtime(
         ).rows[0]?.rating || 1000;
       for (const [code, i] of invites)
         if (i.host === p.id) invites.delete(code);
+      if (!socket.connected || sockets.get(p.id) !== socket)
+        throw new Error("Connection lost. Reconnect and try again.");
       queue.set(p.id, { ...input, at: Date.now(), rating });
       lobby();
       await tryPair();
@@ -335,6 +450,7 @@ export function realtime(
           ability: z.boolean().optional(),
           dx: z.number().min(-1).max(1).optional(),
           dy: z.number().min(-1).max(1).optional(),
+          seq: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
         })
         .safeParse(data);
       if (!result.success) return;
@@ -358,6 +474,13 @@ export function realtime(
       )
         throw new Error("Rematch unavailable.");
       requireFree(p.id);
+      if (m.state.mode === "ai") {
+        const bot = m.state.players.find((player) => player.bot)!;
+        await createAI(p.id, m.state.game, bot.difficulty!);
+        rematched.add(id);
+        setTimeout(() => rematched.delete(id), 600000).unref();
+        return {};
+      }
       if (!m.state.rematch.includes(p.id)) m.state.rematch.push(p.id);
       for (const u of m.state.players)
         sockets.get(u.id)?.emit("match", m.snapshot());
@@ -423,13 +546,7 @@ export function realtime(
       for (const [code, i] of invites)
         if (i.host === p.id) invites.delete(code);
       const id = active.get(p.id);
-      if (id) {
-        const timer = setTimeout(() => {
-          disconnects.delete(p.id);
-          void matches.get(id)?.finish(p.id);
-        }, 20000);
-        disconnects.set(p.id, timer);
-      }
+      if (id) scheduleDisconnect(p.id, id);
       lobby();
     });
   });

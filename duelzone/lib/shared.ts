@@ -20,7 +20,7 @@ export const featuredGames = [
 export const isCompetition = (game: string) =>
   (featuredGames as readonly string[]).includes(game);
 export type Game = (typeof games)[number];
-export type Mode = "ranked" | "casual" | "friend" | "tournament";
+export type Mode = "ranked" | "casual" | "friend" | "tournament" | "ai";
 export const GAME_INFO = {
   dodge: {
     name: "Dodge Duel",
@@ -130,6 +130,8 @@ export type Player = {
   accent: string;
   bio: string;
   rating?: number;
+  bot?: boolean;
+  difficulty?: import("./bot").Difficulty;
 };
 export type Challenge = {
   id: string;

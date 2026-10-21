@@ -16,7 +16,9 @@ npm run dev
 
 Open **http://localhost:3000**. Register two different accounts in two browser profiles, or one regular and one private window. Choose the same game and match type, then **Find a match** in both windows. Alternatively, **Challenge a friend**, copy the invite and open it in the other signed-in window. A single account cannot be its own opponent; connecting the same account twice transfers its live connection to the latest tab.
 
-One player alone stays in the real matchmaking queue until another joins. Warm-ups are explicitly labelled solo practice and never affect profiles or rankings.
+**Quick Match** immediately searches the casual queue across all nine modes. Two Quick Match players get a randomly selected game; a player queued for a specific mode is also compatible. Cancel stops the search, and a lost connection cancels the queue. A real opponent automatically opens the VS introduction and match. One player alone stays in the queue until another joins.
+
+**Play vs AI** offers Dodge Duel, Grid Rush, Aim Clash, Mind Battle and Speed Arena at Easy, Medium, Hard and Expert. Bots read the same visible game state and submit ordinary movements, captures, shots and answers. Difficulty changes reaction time, aim error, memory accuracy and hazard anticipation. Bots are clearly labelled, never appear as online humans, and create no accounts, persistent match history, XP or ranked results. AI rematches start immediately. Solo warm-ups remain available.
 
 Local data persists in `.data/postgres/` using PGlite, an embedded PostgreSQL engine. It is not browser storage or a mock database. Restarting preserves accounts, sessions, completed matches, statistics and brackets. Setting `DATABASE_URL` switches to standard PostgreSQL using the same SQL schema. Do not point multiple processes at the embedded data directory.
 
@@ -24,13 +26,15 @@ Local data persists in `.data/postgres/` using PGlite, an embedded PostgreSQL en
 
 Each match has an introduction, live scores, a persisted result and mutual rematches. The five new modes use a shared authoritative simulation, with 20 Hz physics and 10 Hz snapshots. Clients send inputs rather than scores. Practice runs the same rules locally without opponents or rewards.
 
-| Game | Format | Competitive mechanics |
-| --- | --- | --- |
-| Dodge Duel | Up to 60 seconds | Shared arena, three lives, telegraphed hazards that accelerate, WASD/arrows or drag movement, a dash with a four-second cooldown. Last survivor wins. |
-| Grid Rush | 45 seconds | Expand into adjacent tiles, steal territory, spend energy to fortify your latest capture, and control a rotating bonus tile. |
-| Aim Clash | 45 seconds | Both players race for moving targets. Combos multiply scores; golden targets replenish energy; decoys break streaks. Spend energy on a temporary focus ability. |
-| Mind Battle | Six puzzles | Memorize sequences, solve number patterns and short logic challenges. Both players get the same puzzle; speed and consecutive correct answers increase points. Answers are never sent to clients. |
-| Speed Arena | Six 12-second stages | A shuffled sequence of all four disciplines, with short transitions and normalized scoring so each stage contributes at most 1,000 points. |
+Movement uses immediate client prediction with acknowledged input sequences and smooth reconciliation to authoritative positions. Opponents interpolate buffered snapshots; moving arenas render on Canvas independently of React updates. Inputs send on direction changes with a 160 ms heartbeat, rather than on every rendered frame. Compact, volatile game frames avoid accumulating obsolete movement packets; phase changes and results remain reliable. Extrapolation is bounded and stale inputs stop. This improves responsiveness but does not remove network latency or the free host's CPU and cold-start limits.
+
+| Game        | Format               | Competitive mechanics                                                                                                                                                                             |
+| ----------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dodge Duel  | Up to 60 seconds     | Shared arena, three lives, telegraphed hazards that accelerate, WASD/arrows or drag movement, a dash with a four-second cooldown. Last survivor wins.                                             |
+| Grid Rush   | 45 seconds           | Expand into adjacent tiles, steal territory, spend energy to fortify your latest capture, and control a rotating bonus tile.                                                                      |
+| Aim Clash   | 45 seconds           | Both players race for moving targets. Combos multiply scores; golden targets replenish energy; decoys break streaks. Spend energy on a temporary focus ability.                                   |
+| Mind Battle | Six puzzles          | Memorize sequences, solve number patterns and short logic challenges. Both players get the same puzzle; speed and consecutive correct answers increase points. Answers are never sent to clients. |
+| Speed Arena | Six 12-second stages | A shuffled sequence of all four disciplines, with short transitions and normalized scoring so each stage contributes at most 1,000 points.                                                        |
 
 The original four games remain available. These use one attempt per round; invalid or timed-out attempts receive zero. Highest score wins and equal totals draw.
 
@@ -48,7 +52,7 @@ Scores, random challenges, deadlines, round IDs and Elo are controlled by the se
 - Three daily challenges reset at midnight UTC: complete a match, complete the featured mode, and win a match. Each grants 75 XP once per day. The first five fully completed matches give 50 XP plus 25 for a win; forfeits do not award XP. Practice never changes progression.
 - Eight persistent achievements grant 100 XP each and cosmetic profile titles. Levels take 500 XP. Rewards never change movement, targets, scoring or matchmaking. There are no streak penalties or paid advantages.
 
-- Ranked matchmaking starts within 150 rating points and widens by 15 points per waiting second. Game and match type must match. Casual has no rating restriction.
+- Ranked matchmaking starts within 150 rating points and widens by 15 points per waiting second. Match types must match; a specific-game queue only pairs with that game or a Quick Match wildcard. Casual has no rating restriction.
 - Elo starts at 1,000 with K=32. Bronze → Silver (1,050) → Gold (1,200) → Platinum (1,400) → Diamond (1,650) → Master (1,900) → Champion (2,200).
 - UTC calendar quarters define seasons. Each new quarter has a fresh rating table; historical rows and match history remain in the database. The leaderboard shows the current season's top 100 players with completed ranked games.
 - Casual, friend and tournament matches save stats but do not change Elo. Only the two players can accept a rematch, and both must agree.
@@ -71,8 +75,8 @@ Copy `.env.example` to `.env` only if you want to override defaults. Never commi
 | `PORT`             | HTTP port, default 3000                                                 |
 | `HOST`             | Bind address, default 127.0.0.1; set 0.0.0.0 in a container             |
 | `APP_ORIGIN`       | Exact browser origin for CSRF and WebSockets; production requires HTTPS |
-| `DATABASE_URL`     | PostgreSQL connection URL; required on cloud hosts                       |
-| `EXTRA_ORIGINS`    | Optional comma-separated exact HTTPS origins for custom domains          |
+| `DATABASE_URL`     | PostgreSQL connection URL; required on cloud hosts                      |
+| `EXTRA_ORIGINS`    | Optional comma-separated exact HTTPS origins for custom domains         |
 | `DATA_DIR`         | Optional embedded database directory                                    |
 | `TRUST_PROXY_HOPS` | Set only for a known trusted proxy chain; Compose uses one Caddy proxy  |
 
@@ -104,13 +108,13 @@ The included `railway.json` uses the Dockerfile, one always-running instance, `/
 2. Add the GitHub repository `sugeindok-alt/Nicklas-sine-nettsider`, branch `feat/duelzone`. Set **Root Directory** to `/duelzone` and **Config File** to `/duelzone/railway.json`. Do not deploy the repository root, which contains SocialAtlas.
 3. Generate a public domain for the web service, targeting port `3000`. Set the following variables before deploying:
 
-   | Variable | Value |
-   | --- | --- |
-   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (use the actual database service name) |
-   | `APP_ORIGIN` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` |
-   | `HOST` | `0.0.0.0` |
-   | `PORT` | `3000` |
-   | `TRUST_PROXY_HOPS` | `1` when Railway is the sole trusted reverse proxy |
+   | Variable           | Value                                                               |
+   | ------------------ | ------------------------------------------------------------------- |
+   | `DATABASE_URL`     | `${{Postgres.DATABASE_URL}}` (use the actual database service name) |
+   | `APP_ORIGIN`       | `https://${{RAILWAY_PUBLIC_DOMAIN}}`                                |
+   | `HOST`             | `0.0.0.0`                                                           |
+   | `PORT`             | `3000`                                                              |
+   | `TRUST_PROXY_HOPS` | `1` when Railway is the sole trusted reverse proxy                  |
 
 4. Confirm the database is ready, then deploy the web service. Keep exactly one region and one replica. Disable automatic deployments so code updates cannot interrupt an active tournament unexpectedly.
 5. Verify the public HTTPS page, registration, login and a complete match from two independent accounts. Restart the service and confirm accounts and completed match history remain available. Use the hosted PostgreSQL database; the container's embedded database would be lost on redeployment.
@@ -143,6 +147,7 @@ npm run build
 npm run test:production
 npm run test:integration
 npm run test:live
+npm run test:experience
 ```
 
 Unit tests cover password hashing, session parsing, Elo, season boundaries, each game's scoring, false starts, duplicate/spectator/stale inputs and atomic persistent settlement. The integration suite starts its own API server on port 3101 and creates twelve explicitly named QA accounts in a unique, ignored `test-results/` database. It exercises all four games concurrently using separate authenticated sockets, mode separation, real invites, rematches, reconnects, a complete tournament, persistence across restart, origin rejection and logout. These test players never seed the normal application.
@@ -150,3 +155,5 @@ Unit tests cover password hashing, session parsing, Elo, season boundaries, each
 CI runs these checks on changes to this app. Browser warm-ups, desktop/mobile layout and forms should also be checked when editing the UI. The Docker/PostgreSQL/Caddy stack requires a separate host-level deployment test.
 
 The live integration suite creates ten isolated QA accounts and completes all five new modes through authenticated WebSockets, checking consistent results, a friend invite, reconnection, mutual rematches, reward integrity and persistence after restart. These test clients are never used as production opponents.
+
+Experience tests cover prediction, reconciliation, two moving players with 60/140/220 ms simulated round-trip latency, jitter and 5% packet loss, all five bot modes at all four difficulties, automatic/random Quick Match, cancellation, reconnects, compact frames, a complete AI match and AI rematches without persistent rewards. These are automated independent clients, not evidence of a two-human playtest.

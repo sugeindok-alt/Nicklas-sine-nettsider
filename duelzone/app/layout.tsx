@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./competition.css";
+import "./experience.css";
 export const metadata: Metadata = {
   title: "DuelZone — Every millisecond matters.",
   description:

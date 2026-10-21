@@ -1,3 +1,4 @@
+import { INPUT_TIMEOUT, moveRunner } from "./netcode";
 export type Discipline = "dodge" | "grid" | "clash" | "mind";
 export type CompetitionAction = {
   x?: number;
@@ -9,6 +10,7 @@ export type CompetitionAction = {
   ability?: boolean;
   dx?: number;
   dy?: number;
+  seq?: number;
 };
 export type Runner = {
   x: number;
@@ -27,6 +29,7 @@ export type Runner = {
   dx: number;
   dy: number;
   lastTile: number;
+  inputSequence?: number;
 };
 export type Hazard = {
   id: string;
@@ -303,20 +306,17 @@ export class Competition {
       for (const id of this.ids) {
         const p = v.players[id];
         if (!p.hp) continue;
-        if (now - p.lastInput > 300) {
+        if (now - p.lastInput > INPUT_TIMEOUT) {
           p.dx = 0;
           p.dy = 0;
         }
-        const length = Math.max(1, Math.hypot(p.dx, p.dy)),
-          speed = now < p.dashUntil ? 1.1 : 0.45;
-        p.x = clamp(p.x + (p.dx / length) * speed * dt, 0.025, 0.975);
-        p.y = clamp(p.y + (p.dy / length) * speed * dt, 0.025, 0.975);
+        Object.assign(p, moveRunner(p, now - dt * 1000, now));
         if (
           now >= p.shieldUntil &&
           v.hazards.some(
             (h) =>
               now >= h.activeAt &&
-              Math.hypot(h.x - p.x, h.y - p.y) < h.radius + 0.022,
+              (h.x - p.x) ** 2 + (h.y - p.y) ** 2 < (h.radius + 0.022) ** 2,
           )
         ) {
           p.hp--;
@@ -424,6 +424,14 @@ export class Competition {
     }
     if (v.discipline === "dodge") {
       if (Number.isFinite(action.dx) && Number.isFinite(action.dy)) {
+        if (action.seq !== undefined) {
+          if (
+            !Number.isSafeInteger(action.seq) ||
+            action.seq <= (p.inputSequence || 0)
+          )
+            return;
+          p.inputSequence = action.seq;
+        }
         p.dx = clamp(action.dx!, -1, 1);
         p.dy = clamp(action.dy!, -1, 1);
         p.lastInput = now;
@@ -550,6 +558,17 @@ export class Competition {
   snapshot(): CompetitionView {
     const v = structuredClone(this.view);
     if (v.puzzle && v.now >= v.puzzle.revealUntil) v.puzzle.sequence = [];
+    for (const p of Object.values(v.players)) {
+      p.x = Math.round(p.x * 10000) / 10000;
+      p.y = Math.round(p.y * 10000) / 10000;
+      p.dx = Math.round(p.dx * 1000) / 1000;
+      p.dy = Math.round(p.dy * 1000) / 1000;
+    }
+    for (const item of [...v.hazards, ...v.targets]) {
+      for (const key of ["x", "y", "vx", "vy", "radius"] as const)
+        item[key] = Math.round(item[key] * 10000) / 10000;
+    }
+    if (v.discipline !== "grid") v.tiles = [];
     return v;
   }
   scores() {

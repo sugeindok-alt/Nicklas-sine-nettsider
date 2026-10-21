@@ -12,6 +12,13 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Competition } from "@/lib/competition";
+import {
+  MovementTimeline,
+  INPUT_INTERVAL,
+  INPUT_HEARTBEAT,
+} from "@/lib/netcode";
+import { network } from "@/lib/match-feed";
+import { MotionArena } from "./motion-arena";
 import { GAME_INFO, type Game, type MatchState } from "@/lib/shared";
 import type { Action } from "@/server/game";
 import { tone, unlockSound } from "@/lib/sound";
@@ -35,6 +42,10 @@ export function CompetitionField({
 }) {
   const view = state.competition!,
     player = view.players[userId];
+  const timeline = useRef(new MovementTimeline(userId));
+  const sequence = useRef(Date.now());
+  const lastSent = useRef({ dx: 0, dy: 0, at: 0 });
+  const inputTick = useRef(() => {});
   const [clock, setClock] = useState(Date.now()),
     [pulse, setPulse] = useState(0);
   const received = useRef({ local: Date.now(), server: view.now });
@@ -49,26 +60,30 @@ export function CompetitionField({
   });
   useEffect(() => {
     received.current = { local: Date.now(), server: view.now };
+    timeline.current.receive(view, Date.now(), practice ? 0 : network.rtt / 2);
   }, [view.now]);
   useEffect(() => {
-    let frame: number;
-    const update = () => {
-      setClock(Date.now());
-      frame = requestAnimationFrame(update);
-    };
-    frame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frame);
+    const timer = setInterval(() => setClock(Date.now()), 100);
+    return () => clearInterval(timer);
   }, []);
   const now =
     received.current.server + Math.max(0, clock - received.current.local);
-  const extrapolate = Math.min(
-    0.1,
-    Math.max(0, clock - received.current.local) / 1000,
-  );
   const send = (action: Partial<Action>, gesture = true) => {
     const current = latest.current;
     if (!current.state.challenge || current.state.phase !== "active") return;
     if (gesture) unlockSound();
+    if (action.dx !== undefined && action.dy !== undefined) {
+      const local = Date.now();
+      if (
+        action.dx === lastSent.current.dx &&
+        action.dy === lastSent.current.dy &&
+        local - lastSent.current.at < INPUT_HEARTBEAT
+      )
+        return;
+      action.seq = ++sequence.current;
+      timeline.current.input(action.seq, action.dx, action.dy, local);
+      lastSent.current = { dx: action.dx, dy: action.dy, at: local };
+    }
     current.onAction({
       challengeId: current.state.challenge.id,
       puzzleId: current.state.competition?.puzzle?.id,
@@ -100,14 +115,17 @@ export function CompetitionField({
       ) {
         e.preventDefault();
         pressed.current.add(key);
+        inputTick.current();
         unlockSound();
       }
       if (key === " " && !e.repeat) sendRef.current({ ability: true });
       if (/^[1-4]$/.test(key) && !e.repeat)
         sendRef.current({ choice: Number(key) - 1 });
     };
-    const keyup = (e: KeyboardEvent) =>
+    const keyup = (e: KeyboardEvent) => {
       pressed.current.delete(e.key.toLowerCase());
+      inputTick.current();
+    };
     const reset = () => {
       pressed.current.clear();
       pointer.current = null;
@@ -116,7 +134,7 @@ export function CompetitionField({
     document.addEventListener("keydown", keydown);
     document.addEventListener("keyup", keyup);
     window.addEventListener("blur", reset);
-    const timer = setInterval(() => {
+    inputTick.current = () => {
       const v = latest.current.state.competition,
         p = v?.players[userId];
       if (!v || !p || v.discipline !== "dodge") return;
@@ -127,14 +145,16 @@ export function CompetitionField({
         Number(pressed.current.has("s") || pressed.current.has("arrowdown")) -
         Number(pressed.current.has("w") || pressed.current.has("arrowup"));
       if (pointer.current) {
-        const x = pointer.current.x - p.x,
-          y = pointer.current.y - p.y,
+        const pos = timeline.current.sample(Date.now())?.positions[userId] || p;
+        const x = pointer.current.x - pos.x,
+          y = pointer.current.y - pos.y,
           length = Math.hypot(x, y);
         dx = length > 0.02 ? x / length : 0;
         dy = length > 0.02 ? y / length : 0;
       }
       sendRef.current({ dx, dy }, false);
-    }, 70);
+    };
+    const timer = setInterval(() => inputTick.current(), INPUT_INTERVAL);
     return () => {
       clearInterval(timer);
       document.removeEventListener("keydown", keydown);
@@ -169,20 +189,16 @@ export function CompetitionField({
     (view.discipline === "dodge" ? player.hp > 0 : player.energy >= 3);
   const remaining = Math.max(0, view.stageEnds - now),
     puzzle = view.puzzle;
-  const palette = (id: string) => (id === userId ? "#c8f36a" : "#a5bce9");
-  const position = (event: React.PointerEvent<SVGSVGElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
-    };
-  };
   return (
     <div className={`competition-field discipline-${view.discipline}`}>
       <div className="competition-top">
         <span>
           <i className="status-dot" />
-          {practice ? "SOLO TRAINING" : "LIVE 1V1"}
+          {practice
+            ? "SOLO TRAINING"
+            : state.mode === "ai"
+              ? "AI PRACTICE · BOT"
+              : "LIVE 1V1"}
         </span>
         <b>{labels[view.discipline]}</b>
         <span className={remaining < 5000 ? "urgent" : ""}>
@@ -219,176 +235,25 @@ export function CompetitionField({
       </div>
       <div className="competition-surface">
         {(view.discipline === "dodge" || view.discipline === "clash") && (
-          <svg
-            className={`shared-field ${view.discipline}`}
-            viewBox="0 0 1000 1000"
-            role="img"
-            aria-label={
-              view.discipline === "dodge"
-                ? "Shared dodge arena. Use WASD, arrows, or drag to move."
-                : "Moving target arena. Hit circles, avoid crossed decoys."
-            }
-            onPointerDown={(e) => {
+          <MotionArena
+            view={view}
+            userId={userId}
+            timeline={timeline}
+            onDown={(point) => {
               unlockSound();
-              e.currentTarget.setPointerCapture(e.pointerId);
-              const p = position(e);
-              if (view.discipline === "dodge") pointer.current = p;
-              else send(p);
+              if (view.discipline === "dodge") {
+                pointer.current = point;
+                inputTick.current();
+              } else send(point);
             }}
-            onPointerMove={(e) => {
-              if (e.buttons && view.discipline === "dodge")
-                pointer.current = position(e);
+            onMove={(point) => {
+              if (view.discipline === "dodge") pointer.current = point;
             }}
-            onPointerUp={() => {
+            onUp={() => {
               pointer.current = null;
+              inputTick.current();
             }}
-            onPointerCancel={() => {
-              pointer.current = null;
-            }}
-          >
-            <defs>
-              <pattern
-                id="competition-lines"
-                width="100"
-                height="100"
-                patternUnits="userSpaceOnUse"
-              >
-                <path
-                  d="M100 0H0V100"
-                  fill="none"
-                  stroke="#ffffff08"
-                  strokeWidth="2"
-                />
-              </pattern>
-            </defs>
-            <rect width="1000" height="1000" fill="url(#competition-lines)" />
-            <path
-              d="M470 500h60M500 470v60"
-              stroke="#ffffff13"
-              strokeWidth="2"
-            />
-            {view.discipline === "dodge" && (
-              <>
-                {view.hazards.map((h) =>
-                  now < h.activeAt ? (
-                    <g key={h.id} opacity=".65">
-                      <circle
-                        cx={Math.min(0.97, Math.max(0.03, h.x)) * 1000}
-                        cy={Math.min(0.97, Math.max(0.03, h.y)) * 1000}
-                        r="24"
-                        fill="none"
-                        stroke="#e8b39a"
-                        strokeDasharray="6 6"
-                      />
-                      <path
-                        d={`M${Math.min(0.97, Math.max(0.03, h.x)) * 1000} ${Math.min(0.97, Math.max(0.03, h.y)) * 1000} l${h.vx * 150} ${h.vy * 150}`}
-                        stroke="#e8b39a"
-                        strokeWidth="5"
-                      />
-                    </g>
-                  ) : (
-                    <circle
-                      key={h.id}
-                      cx={(h.x + h.vx * extrapolate) * 1000}
-                      cy={(h.y + h.vy * extrapolate) * 1000}
-                      r={h.radius * 1000}
-                      fill="#e8b39a"
-                    />
-                  ),
-                )}
-                {Object.entries(view.players).map(([id, p]) => {
-                  const moving =
-                    p.hp > 0 &&
-                    now - p.lastInput < 300 &&
-                    !view.ended &&
-                    now >= view.transitionUntil;
-                  const distance = moving
-                    ? (extrapolate * (now < p.dashUntil ? 1.1 : 0.45)) /
-                      Math.max(1, Math.hypot(p.dx, p.dy))
-                    : 0;
-                  const x = Math.max(
-                    0.025,
-                    Math.min(0.975, p.x + p.dx * distance),
-                  );
-                  const y = Math.max(
-                    0.025,
-                    Math.min(0.975, p.y + p.dy * distance),
-                  );
-                  return (
-                    <g
-                      key={id}
-                      opacity={p.hp ? 1 : 0.2}
-                      transform={`translate(${x * 1000} ${y * 1000})`}
-                    >
-                      {p.shieldUntil > now && (
-                        <circle
-                          cx={0}
-                          cy={0}
-                          r="38"
-                          fill="none"
-                          stroke={palette(id)}
-                          strokeWidth="2"
-                          strokeDasharray="8 5"
-                        />
-                      )}
-                      <circle cx={0} cy={0} r="22" fill={palette(id)} />
-                      <text
-                        x={0}
-                        y={-48}
-                        textAnchor="middle"
-                        fill={palette(id)}
-                        fontSize="22"
-                        fontFamily="sans-serif"
-                      >
-                        {id === userId ? "YOU" : "RIVAL"}
-                      </text>
-                    </g>
-                  );
-                })}
-              </>
-            )}
-            {view.discipline === "clash" &&
-              view.targets.map((t) => (
-                <g
-                  key={t.id}
-                  transform={`translate(${(t.x + t.vx * extrapolate) * 1000} ${(t.y + t.vy * extrapolate) * 1000})`}
-                  className={`clash-target ${t.kind}`}
-                >
-                  <circle
-                    r={t.radius * 1000 * (now < player.focusUntil ? 1.5 : 1)}
-                    fill={t.kind === "decoy" ? "#e8b39a0d" : "#ffffff06"}
-                    stroke={
-                      t.kind === "power"
-                        ? "#dec681"
-                        : t.kind === "decoy"
-                          ? "#e8b39a"
-                          : "#c8f36a"
-                    }
-                    strokeWidth="3"
-                  />
-                  {t.kind === "decoy" ? (
-                    <path
-                      d="M-16-16l32 32M16-16l-32 32"
-                      stroke="#e8b39a"
-                      strokeWidth="5"
-                    />
-                  ) : (
-                    <>
-                      <circle
-                        r="13"
-                        fill={t.kind === "power" ? "#dec681" : "#c8f36a"}
-                      />
-                      <circle
-                        r={t.radius * 1000 - 12}
-                        fill="none"
-                        stroke="#ffffff18"
-                        strokeWidth="2"
-                      />
-                    </>
-                  )}
-                </g>
-              ))}
-          </svg>
+          />
         )}
         {view.discipline === "grid" && (
           <div

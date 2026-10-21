@@ -1,5 +1,8 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { MatchIntro } from "./match-intro";
+import { AnimatedNumber } from "./animated-number";
+import { matchFeed } from "@/lib/match-feed";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -255,7 +258,7 @@ export function Playfield({
   );
 }
 
-export default function Arena({
+function Arena({
   state,
   userId,
   onAction,
@@ -303,7 +306,9 @@ export default function Arena({
       tabIndex={-1}
       role="dialog"
       aria-modal="true"
-      aria-label="Live multiplayer match"
+      aria-label={
+        state.mode === "ai" ? "AI practice match" : "Live multiplayer match"
+      }
     >
       <div className="arena-wrap">
         <header className="arena-header">
@@ -312,7 +317,9 @@ export default function Arena({
             <span className="divider" />
             <span className="muted">{GAME_INFO[state.game].name}</span>
           </div>
-          <span className="mode-chip">{state.mode}</span>
+          <span className="mode-chip">
+            {state.mode === "ai" ? "AI PRACTICE · BOT" : state.mode}
+          </span>
           <button
             className="icon-button sound-toggle"
             aria-label={audio ? "Mute sound" : "Enable sound"}
@@ -378,11 +385,17 @@ export default function Arena({
               </div>
               <div>
                 <span className="eyebrow">
-                  {p.id === userId ? "YOU" : "OPPONENT"}
+                  {p.bot
+                    ? "AI OPPONENT · BOT"
+                    : p.id === userId
+                      ? "YOU"
+                      : "OPPONENT"}
                 </span>
                 <h2>{p.username}</h2>
               </div>
-              <strong>{state.scores[p.id].toLocaleString()}</strong>
+              <strong>
+                <AnimatedNumber value={state.scores[p.id]} />
+              </strong>
               {i === 0 && <div className="versus">VS</div>}
             </div>
           ))}
@@ -477,9 +490,13 @@ export default function Arena({
               )}
               <div className="saved-note">
                 <Check size={14} />
-                Result saved to your profile
+                {state.mode === "ai"
+                  ? "AI practice · no ranked points or profile rewards"
+                  : "Result saved to your profile"}
               </div>
             </motion.div>
+          ) : state.phase === "intro" ? (
+            <MatchIntro key={state.id} state={state} userId={userId} />
           ) : (
             <motion.div
               key="field"
@@ -706,5 +723,19 @@ function ClassicPractice({
         <Playfield state={state} userId="you" onAction={action} practice />
       )}
     </div>
+  );
+}
+
+export default function LiveArena(props: React.ComponentProps<typeof Arena>) {
+  const live = useSyncExternalStore(
+    matchFeed.subscribe,
+    matchFeed.get,
+    () => null,
+  );
+  return (
+    <Arena
+      {...props}
+      state={live?.id === props.state.id ? live : props.state}
+    />
   );
 }
