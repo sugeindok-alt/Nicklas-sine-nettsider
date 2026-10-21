@@ -1,0 +1,44 @@
+{
+  "name": "duelzone",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "tsx server/index.ts",
+    "build": "next build --webpack",
+    "start": "tsx server/index.ts --production",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:integration": "tsx tests/integration.ts",
+    "test:production": "node tests/production-smoke.mjs",
+    "format": "prettier --write app components lib server tests"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "motion": "^12.23.24",
+    "next": "16.3.8",
+    "pg": "^8.16.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.20.6",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.19.19",
+    "@types/pg": "^8.15.5",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "prettier": "^3.6.2",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,5 +1,9 @@
 # SocialAtlas
 
+## DuelZone multiplayer application
+
+The separate [DuelZone app](duelzone/README.md) lives in `duelzone/`: four working 1v1 games, real-time matchmaking, friend invites, accounts, persistent PostgreSQL statistics, Elo rankings and four-player tournaments. Run `cd duelzone`, `npm ci`, then `npm run dev`. The SocialAtlas app below is preserved.
+
 A white, responsive website for discovering social accounts recorded for public figures. Built with TypeScript, Next.js App Router conventions through Vinext, Motion and bundled platform icons.
 
 ## Free search
