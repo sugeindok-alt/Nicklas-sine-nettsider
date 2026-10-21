@@ -372,3 +372,7 @@ async function stop() {
 }
 process.on("SIGINT", () => void stop());
 process.on("SIGTERM", () => void stop());
+process.on("message", (message) => {
+  if (message === "duelzone:stop") void stop();
+});
+
