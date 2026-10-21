@@ -1,0 +1,54 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_ORIGIN: https://${DUELZONE_DOMAIN:?Set DUELZONE_DOMAIN}
+      DATABASE_URL: postgres://duelzone:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/duelzone
+      TRUST_PROXY_HOPS: 1
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: duelzone
+      POSTGRES_USER: duelzone
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U duelzone]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DUELZONE_DOMAIN: ${DUELZONE_DOMAIN:?Set DUELZONE_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
