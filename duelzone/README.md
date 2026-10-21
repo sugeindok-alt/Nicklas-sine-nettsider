@@ -82,6 +82,29 @@ The database and Caddy data use named volumes. Back up PostgreSQL regularly. Do 
 
 The Next.js custom server is required to host Socket.IO on the same origin. See [Next.js custom servers](https://nextjs.org/docs/app/guides/custom-server) and [PGlite persistence](https://pglite.dev/docs/).
 
+### Railway
+
+The included `railway.json` uses the Dockerfile, one always-running instance, `/api/health`, and bounded restarts. A connected Railway account with available credits or an approved paid plan is required; adding these files does not publish the app.
+
+1. Create a Railway project and add PostgreSQL. Keep database access on the private network.
+2. Add the GitHub repository `sugeindok-alt/Nicklas-sine-nettsider`, branch `feat/duelzone`. Set **Root Directory** to `/duelzone` and **Config File** to `/duelzone/railway.json`. Do not deploy the repository root, which contains SocialAtlas.
+3. Generate a public domain for the web service, targeting port `3000`. Set the following variables before deploying:
+
+   | Variable | Value |
+   | --- | --- |
+   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (use the actual database service name) |
+   | `APP_ORIGIN` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` |
+   | `HOST` | `0.0.0.0` |
+   | `PORT` | `3000` |
+   | `TRUST_PROXY_HOPS` | `1` when Railway is the sole trusted reverse proxy |
+
+4. Confirm the database is ready, then deploy the web service. Keep exactly one region and one replica. Disable automatic deployments so code updates cannot interrupt an active tournament unexpectedly.
+5. Verify the public HTTPS page, registration, login and a complete match from two independent accounts. Restart the service and confirm accounts and completed match history remain available. Use the hosted PostgreSQL database; the container's embedded database would be lost on redeployment.
+
+Plan updates during a quiet period: the new process marks unfinished matches abandoned on startup. Stop the old deployment before starting its replacement; do not use rolling or overlapping app instances against the same database. Keep database backups and check Railway's current usage charges before enabling a paid plan.
+
+Railway provides HTTPS and [Socket.IO support](https://docs.railway.com/guides/socketio). See its [configuration reference](https://docs.railway.com/config-as-code/reference) and [trial limits](https://docs.railway.com/pricing/free-trial).
+
 ## Verification
 
 ```sh
