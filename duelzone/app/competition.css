@@ -321,7 +321,7 @@
   margin-bottom: 18px;
 }
 .competition-practice .competition-surface {
-  max-width: min(440px, max(200px, calc(100dvh - 390px)));
+  max-width: min(440px, max(200px, calc(100dvh - 460px)));
 }
 .competition-practice .competition-top b {
   font-size: 10px;
