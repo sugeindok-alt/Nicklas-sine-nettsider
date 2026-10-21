@@ -263,8 +263,8 @@ export default function DuelZone() {
     const ping = () => {
       const at = performance.now();
       if (s.connected)
-        s.volatile.emit("clock", () => {
-          network.rtt = performance.now() - at;
+        s.timeout(1500).volatile.emit("clock", (error: Error | null) => {
+          if (!error) network.rtt = performance.now() - at;
         });
     };
     const pingTimer = setInterval(ping, 4000);
@@ -1492,7 +1492,8 @@ export default function DuelZone() {
         {help && (
           <Modal title="Find your edge." wide onClose={() => setHelp(false)}>
             <p className="modal-description">
-              Four skill tests. One real opponent. The highest total score wins.
+              Nine disciplines. Find a real rival, invite a friend, or practise
+              against a clearly labelled AI opponent.
             </p>
             <div className="rules-list">
               {games.map((g) => {
@@ -1503,7 +1504,10 @@ export default function DuelZone() {
                     <div>
                       <h3>
                         {GAME_INFO[g].name}
-                        <span>{GAME_INFO[g].rounds} rounds</span>
+                        <span>
+                          {GAME_INFO[g].rounds}{" "}
+                          {GAME_INFO[g].rounds === 1 ? "round" : "rounds"}
+                        </span>
                       </h3>
                       <p>{GAME_INFO[g].description}</p>
                       <p className="small muted">
@@ -1513,7 +1517,9 @@ export default function DuelZone() {
                             ? "One shot per target. Closer to the center and faster hits score higher. A miss earns zero."
                             : g === "speed"
                               ? "Use keys 1–4 or the color buttons. Match the INK color, ignoring the written word."
-                              : "Space or tap to stop the marker. The closer to center, the higher the score."}
+                              : g === "precision"
+                                ? "Space or tap to stop the marker. The closer to center, the higher the score."
+                                : GAME_INFO[g].keys}
                       </p>
                     </div>
                   </div>
