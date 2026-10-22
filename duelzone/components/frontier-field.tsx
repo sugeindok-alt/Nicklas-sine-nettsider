@@ -87,7 +87,7 @@ export function SeriesRecap({
   );
 }
 
-function render(
+export function renderFrontier(
   ctx: CanvasRenderingContext2D,
   v: FrontierView,
   players: Player[],
@@ -292,7 +292,13 @@ function render(
     }
     ctx.textAlign = "center";
     text(
-      self ? "YOU" : player.bot ? "BOT" : player.username.slice(0, 14),
+      player.id.startsWith("preview-")
+        ? player.username
+        : self
+          ? "YOU"
+          : player.bot
+            ? "BOT"
+            : player.username.slice(0, 14),
       p.x,
       p.y - 32,
       color,
@@ -596,7 +602,7 @@ export function FrontierField({
           element.height = 600 * dpr;
         }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        render(
+        renderFrontier(
           ctx,
           view,
           latest.current.state.players,

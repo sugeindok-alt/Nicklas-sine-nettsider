@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Socket } from "socket.io-client";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -108,6 +109,7 @@ export function SocialPanel({
   onProfile,
   matchId,
   onState,
+  arenaOpen = false,
 }: {
   user: Player;
   socket: Socket | null;
@@ -116,7 +118,14 @@ export function SocialPanel({
   onProfile: (id: string) => void;
   matchId?: string;
   onState?: (state: SocialState | null) => void;
+  arenaOpen?: boolean;
 }) {
+  const [arenaAnchor, setArenaAnchor] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setArenaAnchor(
+      arenaOpen ? document.getElementById("arena-social-anchor") : null,
+    );
+  }, [arenaOpen]);
   const [open, setOpen] = useState(false),
     [tab, setTab] = useState("friends"),
     [social, setSocial] = useState<SocialState | null>(null);
@@ -150,6 +159,7 @@ export function SocialPanel({
     openRef = useRef(open),
     mounted = useRef(true),
     messageEnd = useRef<HTMLDivElement>(null);
+  const preferredGame = useRef<Game | "any">("any");
   selectedRef.current = selected;
   openRef.current = open;
   useEffect(() => {
@@ -164,6 +174,8 @@ export function SocialPanel({
       setResults(null);
       setSelected(d.target || null);
       setChallengeTarget(null);
+      preferredGame.current = d.game && games.includes(d.game) ? d.game : "any";
+      setGame(preferredGame.current);
     };
     window.addEventListener("dz:friends", openSocial);
     return () => window.removeEventListener("dz:friends", openSocial);
@@ -360,7 +372,7 @@ export function SocialPanel({
     setChallengeTarget(p);
     setError("");
     setRules(defaultRules);
-    setGame("any");
+    setGame(preferredGame.current);
   }
   function invitation(c: SocialChallenge) {
     const receiving = c.to_id === user.id;
@@ -441,22 +453,25 @@ export function SocialPanel({
       </motion.div>
     );
   }
+  const launcher = (
+    <motion.button
+      className="social-launcher"
+      whileTap={{ scale: 0.96 }}
+      onClick={() => {
+        setOpen(true);
+        setNotice(null);
+      }}
+      aria-label={`Open friends${badge ? `, ${badge} notifications` : ""}`}
+    >
+      <Users size={19} />
+      <span>Friends</span>
+      {badge > 0 && <b>{badge > 99 ? "99+" : badge}</b>}
+      <i className={connected ? "online" : ""} />
+    </motion.button>
+  );
   return (
     <>
-      <motion.button
-        className="social-launcher"
-        whileTap={{ scale: 0.96 }}
-        onClick={() => {
-          setOpen(true);
-          setNotice(null);
-        }}
-        aria-label={`Open friends${badge ? `, ${badge} notifications` : ""}`}
-      >
-        <Users size={19} />
-        <span>Friends</span>
-        {badge > 0 && <b>{badge > 99 ? "99+" : badge}</b>}
-        <i className={connected ? "online" : ""} />
-      </motion.button>
+      {arenaAnchor ? createPortal(launcher, arenaAnchor) : launcher}
       <AnimatePresence>
         {notice && !open && (
           <motion.div

@@ -221,3 +221,14 @@ npm run reports -- resolve <report-id>
 ### Focused platform verification
 
 `npm run test:platform` covers all four phases using isolated accounts and a temporary database: durable notifications and authorization, compatible Quick Match pools, image validation and favorites, party readiness and private launch, reconnects, tournament registration, reports and block cleanup. `platform.test.ts` covers UTC weekly resets, idempotent rewards, promotion notifications and image validation. These fixtures do not seed the public service. Browser QA uses separate Chrome and in-app sessions for friendship, notifications, party acceptance, readiness and a complete shared match.
+
+
+## Visual identity and gameplay previews
+
+The interface uses self-hosted Manrope (SIL Open Font License in `public/fonts`), a custom split DuelZone mark, graphite surfaces and a restrained lime accent. `app/identity.css` owns the shared presentation and responsive rules; the existing game CSS continues to define gameplay geometry. The public service, backend, authentication and PostgreSQL schema are unchanged by this release.
+
+The homepage showcase and library use local canvas previews. The six physics games reuse the production renderer, simulation and bot drivers. Competition previews take their positions, targets, tiles and puzzles from the existing simulation; the four original timing games show their actual interaction patterns. These are explicitly labelled previews, never reported as live human matches, and do not open sockets or write statistics. Animation runs at up to 30 frames per second only for the showcase or a hovered/focused card, pauses offscreen/in hidden tabs or behind dialogs, and respects reduced motion. Pause and game-switch controls are keyboard accessible.
+
+The library launches the selected ranked/casual game directly and carries its game choice into the friends challenge form. Daily and weekly progression remain on Home and Profile. The Friends control moves into the match header while playing so that it cannot cover the arena or ability controls.
+
+Visual validation uses real local QA accounts on the isolated development database. Desktop and 390px mobile screenshots cover the dashboard/library, queue cancellation, profile, social panel, notifications, settings, tournaments, AI match HUD and results. No public sample players or statistics are added for presentation.

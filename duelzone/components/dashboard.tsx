@@ -16,6 +16,8 @@ import type { Profile, Tournament } from "./duelzone";
 import { openFriends, type Command } from "./platform-center";
 import { ProgressionPanel } from "./progression";
 import GameArt from "./game-art";
+import { RankCrest } from "./rank-crest";
+import { ArenaShowcase } from "./arena-showcase";
 export function Dashboard({
   profile,
   social,
@@ -71,34 +73,22 @@ export function Dashboard({
     <div className="dashboard">
       <div className="page-intro">
         <div>
-          <p className="eyebrow">YOUR COMPETITIVE HOME</p>
+          <p className="eyebrow">Your arena</p>
           <h1>Welcome back, {p.username}.</h1>
         </div>
         <span className="subtle-tag">
-          LEVEL {profile.progression.level} / {profile.progression.title}
+          Level {profile.progression.level} / {profile.progression.title}
         </span>
       </div>
       <section className="dashboard-hero">
-        <div>
-          <span className="eyebrow">ONE MATCH CAN CHANGE YOUR DAY</span>
-          <h2>
-            Find your next
-            <br />
-            <em>great rivalry.</em>
-          </h2>
-          <p>Your games. Your circle. Your next personal best.</p>
-          <button
-            className="button primary dashboard-quick"
-            onClick={() => play("any")}
-          >
-            <Zap size={20} /> Quick Match <ArrowUpRight size={20} />
-          </button>
-          <button className="text-button" onClick={() => navigate("arena")}>
-            Explore all {games.length} games <ArrowRight size={15} />
-          </button>
-        </div>
+        <ArenaShowcase
+          compact
+          quick={() => play("any")}
+          challenge={() => openFriends()}
+          practice={practice}
+        />
         <button className="dashboard-rank" onClick={() => navigate("profile")}>
-          <Trophy size={36} />
+          <RankCrest rating={profile.rating.rating} />
           <span>{rank.name}</span>
           <strong>
             {profile.rating.rating}

@@ -1,6 +1,7 @@
 "use client";
 import { FrontierField, FrontierPractice, SeriesRecap } from "./frontier-field";
 import { isFrontier } from "@/lib/frontier";
+import { Brand } from "./brand";
 import { MatchIntro } from "./match-intro";
 import { AnimatedNumber } from "./animated-number";
 import { matchFeed } from "@/lib/match-feed";
@@ -316,13 +317,14 @@ function Arena({
       <div className="arena-wrap">
         <header className="arena-header">
           <div className="wordmark">
-            <span className="brand-symbol">◩</span>DUELZONE
+            <Brand />
             <span className="divider" />
             <span className="muted">{GAME_INFO[state.game].name}</span>
           </div>
           <span className="mode-chip">
             {state.mode === "ai" ? "AI PRACTICE · BOT" : state.mode}
           </span>
+          <div id="arena-social-anchor" />
           <button
             className="icon-button sound-toggle"
             aria-label={audio ? "Mute sound" : "Enable sound"}
@@ -418,7 +420,11 @@ function Arena({
               animate={{ opacity: 1, y: 0 }}
             >
               <div className={`result-emblem ${won ? "won" : ""}`}>
-                <Trophy size={48} strokeWidth={1} />
+                {won ? (
+                  <Trophy size={48} strokeWidth={1} />
+                ) : (
+                  <Target size={48} strokeWidth={1} />
+                )}
               </div>
               {won && (
                 <div className="victory-lines" aria-hidden="true">
@@ -433,19 +439,13 @@ function Arena({
               <span className="eyebrow">
                 {state.reason === "Score" ? "MATCH COMPLETE" : state.reason}
               </span>
-              <h1>
-                {tie
-                  ? "Perfectly matched."
-                  : won
-                    ? "That’s your win."
-                    : "The next one is yours."}
-              </h1>
+              <h1>{tie ? "A draw." : won ? "Victory." : "Defeat."}</h1>
               <p>
                 {tie
                   ? "Even on points. Settle it with a rematch."
                   : won
-                    ? "Small margins. A well-earned victory."
-                    : "Every match is a chance to find your edge."}
+                    ? "Well played. Ready to defend it?"
+                    : "A new round. Another chance."}
               </p>
               {state.mode === "ranked" && (
                 <div className="rating-result">

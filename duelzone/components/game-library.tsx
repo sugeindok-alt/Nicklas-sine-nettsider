@@ -3,10 +3,11 @@ import { useState } from "react";
 import {
   Search,
   Star,
-  Check,
-  ArrowRight,
   ArrowUpRight,
   SlidersHorizontal,
+  Swords,
+  Play,
+  Shield,
 } from "lucide-react";
 import { GAME_INFO, games, type Game } from "@/lib/shared";
 import {
@@ -15,12 +16,17 @@ import {
   duration,
   type Preferences,
 } from "@/lib/platform";
-import GameArt, { gameIcons } from "./game-art";
+import { gameIcons } from "./game-art";
 import type { Profile } from "./duelzone";
+import { GameplayPreview } from "./gameplay-preview";
 export function GameLibrary({
   selected,
   onSelect,
   onPractice,
+  onPlay,
+  onChallenge,
+  mode,
+  onMode,
   preferences,
   save,
   onLogin,
@@ -30,6 +36,10 @@ export function GameLibrary({
   selected: Game;
   onSelect: (g: Game) => void;
   onPractice: (g: Game) => void;
+  onPlay: (g: Game) => void;
+  onChallenge: (g: Game) => void;
+  mode: "ranked" | "casual";
+  onMode: (mode: "ranked" | "casual") => void;
   preferences: Preferences;
   save: (p: Preferences) => Promise<void>;
   onLogin: () => void;
@@ -41,7 +51,9 @@ export function GameLibrary({
     [filter, setFilter] = useState("all"),
     [options, setOptions] = useState(false),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [preview, setPreview] = useState<Game | null>(null),
+    [details, setDetails] = useState<Game | null>(null);
   const recent = [
     ...new Set(
       profile?.history
@@ -83,7 +95,7 @@ export function GameLibrary({
     <section className="game-section game-library" aria-label="Game library">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">FIND YOUR NEXT OBSESSION</p>
+          <p className="eyebrow">Choose your discipline</p>
           <h2>
             The game library <span className="count-badge">{games.length}</span>
           </h2>
@@ -101,7 +113,7 @@ export function GameLibrary({
           <Search size={17} />
           <input
             aria-label="Search games"
-            placeholder="Search a discipline…"
+            placeholder="Find your game…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -115,6 +127,23 @@ export function GameLibrary({
           <option value="favorites">Your favorites</option>
           <option value="recent">Recently played</option>
         </select>
+        <div className="mode-toggle" aria-label="Match type">
+          <button
+            aria-pressed={mode === "ranked"}
+            className={mode === "ranked" ? "active" : ""}
+            onClick={() => onMode("ranked")}
+          >
+            <Shield size={14} />
+            Ranked
+          </button>
+          <button
+            aria-pressed={mode === "casual"}
+            className={mode === "casual" ? "active" : ""}
+            onClick={() => onMode("casual")}
+          >
+            Casual
+          </button>
+        </div>
       </div>
       <div className="library-categories" aria-label="Game categories">
         {categories.map((c) => (
@@ -154,26 +183,39 @@ export function GameLibrary({
           {error}
         </p>
       )}
-      <div className="game-grid">
+      <div
+        className={`game-grid discovery-grid ${!query && group === "All games" && filter === "all" ? "has-featured" : ""}`}
+      >
         {list.map((g, i) => {
           const Icon = gameIcons[g],
             record = profile?.records.find((r) => r.game === g);
           return (
             <article
               key={g}
-              className={`game-card ${selected === g ? "selected" : ""}`}
+              className={`game-card ${selected === g ? "selected" : ""} ${i < 2 ? "featured-card" : ""}`}
+              onMouseEnter={() => setPreview(g)}
+              onMouseLeave={() => setPreview(null)}
+              onFocus={() => setPreview(g)}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget))
+                  setPreview(null);
+              }}
               style={
                 { "--game-color": GAME_INFO[g].color } as React.CSSProperties
               }
             >
               <button
                 className="game-preview"
-                onClick={() => onPractice(g)}
-                aria-label={`Practice ${GAME_INFO[g].name}`}
+                onClick={() => {
+                  onSelect(g);
+                  setDetails(details === g ? null : g);
+                }}
+                aria-label={`Details for ${GAME_INFO[g].name}`}
+                aria-expanded={details === g}
               >
-                <GameArt game={g} />
+                <GameplayPreview game={g} animate={preview === g} />
                 <span className="preview-label">
-                  Try a warm-up <ArrowUpRight size={14} />
+                  Explore game <ArrowUpRight size={14} />
                 </span>
                 <span className="game-number">
                   {String(games.indexOf(g) + 1).padStart(2, "0")}
@@ -205,27 +247,46 @@ export function GameLibrary({
                   </button>
                 </div>
                 <p>{duration(g)} · 2 players</p>
+                <p className="game-short-description">
+                  {GAME_INFO[g].description.split(". ")[0]}.
+                </p>
                 {record && (
                   <small className="personal-record">
                     {record.wins} wins / {record.played} played · Best{" "}
                     {g === "showdown" ? record.best / 2 : record.best}
                   </small>
                 )}
-                <button
-                  className="game-select"
-                  onClick={() => onSelect(g)}
-                  aria-pressed={selected === g}
-                >
-                  {selected === g ? (
-                    <>
-                      <Check size={14} /> Selected
-                    </>
-                  ) : (
-                    <>
-                      Select game <ArrowRight size={15} />
-                    </>
-                  )}
-                </button>
+                {details === g && (
+                  <div className="game-rules">
+                    <p>{GAME_INFO[g].description}</p>
+                    <span>{GAME_INFO[g].keys.toLowerCase()}</span>
+                  </div>
+                )}
+                <div className="game-actions">
+                  <button
+                    className="button primary compact"
+                    onClick={() => onPlay(g)}
+                    aria-label={`Play ${GAME_INFO[g].name}`}
+                  >
+                    <Play size={13} fill="currentColor" />
+                    Play
+                  </button>
+                  <button
+                    className="text-button"
+                    onClick={() => onPractice(g)}
+                    aria-label={`Practice ${GAME_INFO[g].name}`}
+                  >
+                    Practice
+                  </button>
+                  <button
+                    className="icon-button"
+                    onClick={() => onChallenge(g)}
+                    aria-label={`Challenge a friend to ${GAME_INFO[g].name}`}
+                    title="Challenge a friend"
+                  >
+                    <Swords size={17} />
+                  </button>
+                </div>
               </div>
             </article>
           );

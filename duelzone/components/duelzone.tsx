@@ -10,14 +10,12 @@ import { io, type Socket } from "socket.io-client";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import {
   Activity,
-  Bot,
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
   Check,
   ChevronRight,
   Copy,
-  Crosshair,
   Gamepad2,
   History,
   Info,
@@ -27,30 +25,29 @@ import {
   Search,
   Settings,
   Shield,
-  Signal,
   Swords,
   Trophy,
   User,
   Users,
   X,
-  Zap,
 } from "lucide-react";
 import {
   GAME_INFO,
   RANKS,
   games,
   featuredGames,
-  isCompetition,
   rankFor,
   type Game,
   type MatchState,
   type Player,
 } from "@/lib/shared";
-import { frontierGames, isFrontier } from "@/lib/frontier";
 import { matchFeed, network } from "@/lib/match-feed";
 import { api } from "@/lib/client";
-import GameArt, { gameIcons } from "./game-art";
+import { gameIcons } from "./game-art";
 import Modal from "./modal";
+import { RankCrest } from "./rank-crest";
+import { Brand } from "./brand";
+import { ArenaShowcase } from "./arena-showcase";
 import { ProgressionPanel } from "./progression";
 import type { Progression } from "@/lib/progression";
 import { AIPicker } from "./ai-picker";
@@ -150,7 +147,7 @@ export type Tournament = {
 };
 const nav = [
   { id: "dashboard", label: "Home", icon: Activity },
-  { id: "arena", label: "The arena", icon: Gamepad2 },
+  { id: "arena", label: "Game library", icon: Gamepad2 },
   { id: "leaderboard", label: "Leaderboard", icon: Trophy },
   { id: "tournaments", label: "Tournaments", icon: Swords },
   { id: "profile", label: "Your profile", icon: User },
@@ -495,10 +492,9 @@ export default function DuelZone() {
         ),
       )
     : 100;
-  const GameIcon = gameIcons[game];
   const pageTitle = {
     dashboard: "Your dashboard",
-    arena: "The arena",
+    arena: "Game library",
     leaderboard: "Leaderboard",
     tournaments: "Tournaments",
     profile: "Player profile",
@@ -643,14 +639,10 @@ export default function DuelZone() {
             className="wordmark brand"
             onClick={() => navigate("arena")}
           >
-            <span className="brand-mark">
-              <i />
-              <i />
-            </span>
-            DUELZONE<span className="brand-period">®</span>
+            <Brand />
           </a>
-          <div className="workspace-label">THE COMPETITIVE PLAYGROUND</div>
-          <div className="nav-group-label">PLAY & COMPETE</div>
+          <div className="workspace-label">Play. Compete. Connect.</div>
+          <div className="nav-group-label">Discover</div>
           <nav aria-label="Main navigation">
             {nav
               .filter((item) => user || item.id !== "dashboard")
@@ -727,7 +719,7 @@ export default function DuelZone() {
               >
                 <Menu size={21} />
               </button>
-              <span className="breadcrumb">PLAY</span>
+              <span className="breadcrumb">DuelZone</span>
               <ChevronRight size={13} />
               <strong>{pageTitle}</strong>
             </div>
@@ -832,127 +824,25 @@ export default function DuelZone() {
                   ))}
                 {view === "arena" && (
                   <>
-                    <div className="page-intro">
-                      <div>
-                        <p className="eyebrow">YOUR NEXT RIVAL IS OUT THERE</p>
-                        <h1>
-                          {user
-                            ? `Good to see you, ${user.username}.`
-                            : "Welcome to your proving ground."}
-                        </h1>
-                      </div>
-                      <span className="subtle-tag">
-                        <Signal size={13} />
-                        REAL-TIME 1V1
-                      </span>
-                    </div>
-                    <section className="hero">
-                      <div className="hero-copy">
-                        <span className="hero-kicker">
-                          <span />
-                          PURE SKILL. REAL COMPETITION.
-                        </span>
-                        <h2>
-                          Small margins.
-                          <br />
-                          <span>Big wins.</span>
-                        </h2>
-                        <p>
-                          No loadouts. No luck. Just you, your opponent,
-                          <br className="desktop-break" /> and the moment that
-                          makes the difference.
-                        </p>
-                        <div className="hero-actions">
-                          <button
-                            className="button primary"
-                            onClick={() => play("any", "casual")}
-                            disabled={busy}
-                          >
-                            <Zap size={17} fill="currentColor" />
-                            Quick Match
-                            <ArrowUpRight size={18} />
-                          </button>
-                          <button
-                            className="button ghost"
-                            onClick={() =>
-                              user
-                                ? window.dispatchEvent(
-                                    new CustomEvent("dz:friends"),
-                                  )
-                                : setAuth("login")
-                            }
-                          >
-                            <Users size={17} />
-                            Challenge a friend
-                          </button>
-                        </div>
-                        <button
-                          className="text-button ai-entry"
-                          onClick={() => setAiPicker(true)}
-                        >
-                          <Bot size={17} /> Play vs AI{" "}
-                          <span>4 difficulty levels</span>
-                          <ArrowRight size={15} />
-                        </button>
-                        <div className="hero-footnote">
-                          <span>
-                            <Shield size={13} />
-                            Skill-based matchmaking
-                          </span>
-                          <i />
-                          <span>Free to compete</span>
-                        </div>
-                      </div>
-                      <button
-                        className="hero-visual"
-                        onClick={() => setPractice("clash")}
-                        aria-label="Try the Aim Clash interactive preview"
-                      >
-                        <div className="hero-orbit orbit-one" />
-                        <div className="hero-orbit orbit-two" />
-                        <div className="hero-orbit orbit-three" />
-                        <svg
-                          viewBox="0 0 500 400"
-                          className="hero-lines"
-                          aria-hidden="true"
-                        >
-                          <path d="M0 340L500 70M70 400L500 170M0 210L420 0M-30 100L180 0" />
-                          <path
-                            className="hero-line-accent"
-                            d="M100 400L500 0"
-                          />
-                        </svg>
-                        <div className="hero-crosshair">
-                          <i />
-                          <i />
-                          <span />
-                        </div>
-                        <div className="hero-target target-back" />
-                        <div className="hero-coordinate coord-top">
-                          DZ // COMPETITIVE SYSTEMS
-                        </div>
-                        <div className="hero-coordinate coord-bottom">
-                          <span className="status-dot" />
-                          ENTER THE ZONE
-                          <ArrowUpRight size={16} />
-                        </div>
-                        <span className="visual-index">
-                          PHYSICS. TACTICS. COMPETITION.
-                        </span>
-                      </button>
-                    </section>
-                    {ownProfile?.progression && (
-                      <ProgressionPanel
-                        progress={ownProfile.progression}
-                        compact
-                      />
-                    )}
+                    <ArenaShowcase
+                      quick={() => play("any", "casual")}
+                      challenge={() =>
+                        user
+                          ? window.dispatchEvent(new CustomEvent("dz:friends"))
+                          : setAuth("login")
+                      }
+                      ai={() => setAiPicker(true)}
+                      practice={setPractice}
+                      busy={busy}
+                    />
                     <section className="showdown-feature">
+                      <div className="showdown-monogram" aria-hidden="true">
+                        <Brand compact />
+                        <span>V</span>
+                      </div>
                       <div>
-                        <span className="eyebrow">
-                          THE COMPLETE COMPETITOR / NEW
-                        </span>
-                        <h2>DuelZone Showdown.</h2>
+                        <span className="eyebrow">The signature series</span>
+                        <h2>Five games. One champion.</h2>
                         <p>
                           One rival. Five disciplines. A new draw every series.
                           Win three rounds across combat, movement, sport and
@@ -981,6 +871,22 @@ export default function DuelZone() {
                       selected={game}
                       onSelect={setGame}
                       onPractice={setPractice}
+                      onPlay={(g) => {
+                        setGame(g);
+                        play(g, mode);
+                      }}
+                      onChallenge={(g) => {
+                        setGame(g);
+                        user
+                          ? window.dispatchEvent(
+                              new CustomEvent("dz:friends", {
+                                detail: { game: g },
+                              }),
+                            )
+                          : setAuth("login");
+                      }}
+                      mode={mode}
+                      onMode={setMode}
                       preferences={
                         platform.state?.preferences || defaultPreferences
                       }
@@ -992,53 +898,6 @@ export default function DuelZone() {
                       onLogin={() => setAuth("login")}
                       profile={ownProfile}
                     />
-                    <div className="play-strip">
-                      <div className="selected-game-icon">
-                        <GameIcon size={22} />
-                      </div>
-                      <div>
-                        <strong>{GAME_INFO[game].name}</strong>
-                        <span>
-                          {isFrontier(game)
-                            ? game === "showdown"
-                              ? "Best of five"
-                              : "90 seconds"
-                            : isCompetition(game)
-                              ? game === "arena"
-                                ? "6 stages"
-                                : game === "mind"
-                                  ? "6 puzzles"
-                                  : "45–60 seconds"
-                              : `${GAME_INFO[game].rounds} rounds`}{" "}
-                          · {GAME_INFO[game].keys.toLowerCase()}
-                        </span>
-                      </div>
-                      <div className="mode-toggle" aria-label="Match type">
-                        <button
-                          aria-pressed={mode === "ranked"}
-                          className={mode === "ranked" ? "active" : ""}
-                          onClick={() => setMode("ranked")}
-                        >
-                          <Shield size={14} />
-                          Ranked
-                        </button>
-                        <button
-                          aria-pressed={mode === "casual"}
-                          className={mode === "casual" ? "active" : ""}
-                          onClick={() => setMode("casual")}
-                        >
-                          Casual
-                        </button>
-                      </div>
-                      <button
-                        className="button primary"
-                        disabled={busy}
-                        onClick={() => play()}
-                      >
-                        Find a match
-                        <ArrowRight size={17} />
-                      </button>
-                    </div>
                     <div className="lower-grid">
                       <section className="panel">
                         <div className="panel-heading">
@@ -1063,9 +922,7 @@ export default function DuelZone() {
                       </section>
                       <section className="rank-panel">
                         <div className="rank-top">
-                          <span className="eyebrow">
-                            YOUR CLIMB STARTS HERE
-                          </span>
+                          <span className="eyebrow">Your ranked journey</span>
                           <ArrowUpRight size={17} />
                         </div>
                         <div className="rank-feature">
@@ -1114,7 +971,7 @@ export default function DuelZone() {
                       </section>
                     </div>
                     <div className="arena-footer">
-                      <span>BUILT FOR THE COMPETITIVE SPIRIT.</span>
+                      <span>Made for the next match.</span>
                       <div>
                         <span>{games.length} competitive games</span>
                         <i />
@@ -1129,14 +986,14 @@ export default function DuelZone() {
                 {view === "leaderboard" && (
                   <>
                     <PageHeading
-                      eyebrow="EARN YOUR PLACE"
-                      title="The best rise to the top."
-                      description="Every point earned against a real opponent. Every position worth defending."
+                      eyebrow="Ranked competition"
+                      title="The leaderboard."
+                      description="The players setting the pace this season. Your next match could change the order."
                     />
                     <div className="leaderboard-banner">
                       <Shield size={40} strokeWidth={1} />
                       <div>
-                        <span className="eyebrow">CURRENT COMPETITION</span>
+                        <span className="eyebrow">Current season</span>
                         <h2>{overview.season.name}</h2>
                       </div>
                       <div className="banner-stat">
@@ -1170,17 +1027,44 @@ export default function DuelZone() {
                       </button>
                     </div>
                     <div className="rank-tiers">
-                      {RANKS.map((r, i) => (
+                      {RANKS.map((r) => (
                         <div key={r.name}>
-                          <Shield
-                            size={20}
-                            style={{ opacity: 0.4 + i * 0.1 }}
-                          />
+                          <RankCrest rating={r.min} size={32} />
                           <strong>{r.name}</strong>
                           <span>{r.min}+ RP</span>
                         </div>
                       ))}
                     </div>
+                    {board.length > 0 && (
+                      <div className="podium" aria-label="Season leaders">
+                        {board.slice(0, 3).map((p, i) => (
+                          <button
+                            key={p.id}
+                            className={`podium-player place-${i + 1}`}
+                            onClick={() => showProfile(p.id)}
+                          >
+                            <span className="podium-position">0{i + 1}</span>
+                            <PlayerAvatar player={p} />
+                            <div>
+                              <span>
+                                {i === 0
+                                  ? "Season leader"
+                                  : rankFor(p.rating).name}
+                              </span>
+                              <strong>{p.username}</strong>
+                              <small>
+                                {p.wins} wins · {p.games} ranked matches
+                              </small>
+                            </div>
+                            <b>
+                              {p.rating.toLocaleString()}
+                              <small>RP</small>
+                            </b>
+                            <ArrowUpRight size={16} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <section className="panel full">
                       <div className="panel-heading">
                         <h2>Global standings</h2>
@@ -1212,7 +1096,7 @@ export default function DuelZone() {
                 {view === "tournaments" && (
                   <>
                     <PageHeading
-                      eyebrow="RAISE THE STAKES"
+                      eyebrow="Tournaments"
                       title="Four players. One champion."
                       description="Create a four-player knockout, gather your rivals and settle it in the arena."
                       action={
@@ -1235,6 +1119,10 @@ export default function DuelZone() {
                       notify={notify}
                     />
                     <div className="tournament-explainer">
+                      <div className="tournament-crest" aria-hidden="true">
+                        <Brand compact />
+                        <span>IV</span>
+                      </div>
                       <span>
                         01 <b>Gather your four</b>
                       </span>
@@ -1412,8 +1300,16 @@ export default function DuelZone() {
                               : undefined
                           }
                         >
+                          <div
+                            className="profile-banner-identity"
+                            aria-hidden="true"
+                          >
+                            <Brand />
+                            <span>{profile.progression.title}</span>
+                          </div>
                           <span>
-                            DUELZONE / {profile.progression.title.toUpperCase()}
+                            Level {profile.progression.level} /{" "}
+                            {profile.progression.title}
                           </span>
                         </div>
                         <div className="profile-hero">
@@ -1422,7 +1318,7 @@ export default function DuelZone() {
                             className="profile-avatar"
                           />
                           <div>
-                            <span className="eyebrow">DUELZONE PLAYER</span>
+                            <span className="eyebrow">Player profile</span>
                             <h1>{profile.player.username}</h1>
                             <p>
                               {profile.player.bio ||
@@ -1430,7 +1326,10 @@ export default function DuelZone() {
                             </p>
                           </div>
                           <span className="profile-rank">
-                            <Shield size={25} />
+                            <RankCrest
+                              rating={profile.rating.rating}
+                              size={44}
+                            />
                             {rankFor(profile.rating.rating).name}
                             <small>{profile.rating.rating} RP</small>
                           </span>
@@ -1701,15 +1600,15 @@ export default function DuelZone() {
             onClose={() => void leaveQueue()}
           >
             <div className="matchmaking">
-              <div className="radar">
-                <i />
-                <i />
-                <i />
-                <Crosshair size={32} />
+              <div className="search-visual" aria-hidden="true">
+                <Brand compact />
+                <span />
+                <span />
+                <span />
               </div>
               <span className="eyebrow">
                 {queue.game === "any"
-                  ? "QUICK MATCH · ALL DISCIPLINES"
+                  ? "Quick Match · All games"
                   : GAME_INFO[queue.game].name}
               </span>
               {queue.game === "any" && (
@@ -1722,7 +1621,9 @@ export default function DuelZone() {
                   ))}
                 </div>
               )}
-              <h3>{queue.invite ? "Invite a friend." : "Stay sharp."}</h3>
+              <h3>
+                {queue.invite ? "Invite a friend." : "Looking for your match"}
+              </h3>
               <p>
                 {queue.invite
                   ? "Share this link. The match starts when your friend joins."
@@ -1833,6 +1734,7 @@ export default function DuelZone() {
         )}
         {user && (
           <SocialPanel
+            arenaOpen={!!match}
             user={user}
             socket={socket.current}
             connected={connected}
@@ -1923,11 +1825,15 @@ function AuthForm({
     }
   }
   return (
-    <form onSubmit={submit} className="form-stack">
+    <form onSubmit={submit} className="form-stack auth-form">
+      <div className="auth-brand">
+        <Brand compact />
+        <span>Your place in the arena.</span>
+      </div>
       <p className="modal-description">
         {mode === "register"
-          ? "Your skill. Your identity. Your place on the leaderboard."
-          : "Your next opponent is waiting."}
+          ? "Create your account to compete, connect and track your progress."
+          : "Sign in to pick up where you left off."}
       </p>
       {mode === "register" && (
         <label>

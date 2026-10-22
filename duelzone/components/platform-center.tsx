@@ -147,7 +147,7 @@ export function NotificationCenter({
                   <i />
                   <span>
                     <small>
-                      {n.kind.toUpperCase()} ·{" "}
+                      {n.kind.charAt(0).toUpperCase() + n.kind.slice(1)} ·{" "}
                       {new Date(n.created_at).toLocaleDateString()}
                     </small>
                     <b>{n.body}</b>
