@@ -184,8 +184,9 @@ test("Progression awards are transactional, daily goals unique, match XP capped,
   const p = (await db.profile(a))!.progression;
   assert.equal(p.daily.filter((g) => g.complete).length, 3);
   assert.equal(p.achievements.length, 1);
-  assert.equal(p.xp, 700);
-  assert.equal(p.level, 2);
+  assert.equal(p.weekly?.filter((g) => g.complete).length, 2);
+  assert.equal(p.xp, 1000);
+  assert.equal(p.level, 3);
   assert.equal(p.rewardedMatches, 5);
   assert(last);
   await db.close();
