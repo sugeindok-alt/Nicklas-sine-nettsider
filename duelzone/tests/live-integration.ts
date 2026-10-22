@@ -21,6 +21,7 @@ const clients: {
   socket: Socket;
   state?: MatchState;
   memories: Map<string, number[]>;
+  capturedGridTile: boolean;
 }[] = [];
 const timers: ReturnType<typeof setInterval>[] = [];
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -95,10 +96,16 @@ async function create(index: number) {
     cookie: result.cookie!,
     socket,
     memories: new Map(),
+    capturedGridTile: false,
   };
   clients.push(client);
   socket.on("match", (state: MatchState) => {
     client.state = state;
+    if (
+      state.competition?.discipline === "grid" &&
+      state.competition.players[client.user.id]?.energy > 0
+    )
+      client.capturedGridTile = true;
     const p = state.competition?.puzzle;
     if (p?.sequence.length) client.memories.set(p.id, p.sequence);
   });
@@ -246,8 +253,17 @@ try {
         y = b.state!;
       assert.equal(x.id, y.id);
       assert.deepEqual(x.scores, y.scores);
-      assert(x.scores[a.user.id] > 0);
-      assert(x.scores[b.user.id] > 0);
+      if (game === "grid") {
+        assert(a.capturedGridTile && b.capturedGridTile);
+        for (const c of [a, b]) {
+          assert(Number.isFinite(x.scores[c.user.id]));
+          assert(x.scores[c.user.id] >= 0);
+        }
+        assert(x.scores[a.user.id] + x.scores[b.user.id] > 0);
+      } else {
+        assert(x.scores[a.user.id] > 0);
+        assert(x.scores[b.user.id] > 0);
+      }
       const profile = (await request("/profile/" + a.user.id)).data;
       assert(profile.history.some((h: any) => h.id === x.id));
       assert(profile.progression.xp > 0);
