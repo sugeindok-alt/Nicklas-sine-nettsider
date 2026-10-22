@@ -7,7 +7,7 @@ import {
   type FormEvent,
 } from "react";
 import { io, type Socket } from "socket.io-client";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import {
   Activity,
   ArrowDownRight,
@@ -16,7 +16,6 @@ import {
   Check,
   ChevronRight,
   Copy,
-  Crosshair,
   Gamepad2,
   History,
   Info,
@@ -26,29 +25,54 @@ import {
   Search,
   Settings,
   Shield,
-  Signal,
   Swords,
   Trophy,
   User,
   Users,
   X,
-  Zap,
 } from "lucide-react";
 import {
   GAME_INFO,
   RANKS,
   games,
+  featuredGames,
   rankFor,
   type Game,
   type MatchState,
   type Player,
 } from "@/lib/shared";
+import { matchFeed, network } from "@/lib/match-feed";
 import { api } from "@/lib/client";
-import GameArt, { gameIcons } from "./game-art";
+import { gameIcons } from "./game-art";
 import Modal from "./modal";
+import { RankCrest } from "./rank-crest";
+import { Brand } from "./brand";
+import { ArenaShowcase } from "./arena-showcase";
+import { ProgressionPanel } from "./progression";
+import type { Progression } from "@/lib/progression";
+import { AIPicker } from "./ai-picker";
+import { AnimatedNumber } from "./animated-number";
+import type { Difficulty } from "@/lib/bot";
 import Arena, { Practice } from "./arena";
+import {
+  PlayerAvatar,
+  ProfileExtras,
+  ProfileMediaEditor,
+} from "./profile-extras";
+import {
+  PartyPanel,
+  TournamentInvitations,
+  TournamentInviteButton,
+} from "./party-panel";
+import { GameLibrary } from "./game-library";
+import { Dashboard } from "./dashboard";
+import { defaultPreferences } from "@/lib/platform";
+import { NotificationCenter, usePlatform } from "./platform-center";
+import type { SocialState } from "@/lib/social";
+import { SocialPanel } from "./social-panel";
 
 type View =
+  | "dashboard"
   | "arena"
   | "leaderboard"
   | "tournaments"
@@ -56,7 +80,8 @@ type View =
   | "history"
   | "settings";
 type Pending =
-  | { game: Game; mode: "ranked" | "casual" | "friend" }
+  | { game: Game | "any"; mode: "ranked" | "casual" | "friend" }
+  | { ai: Game; difficulty: Difficulty }
   | { invite: string };
 type Overview = {
   online: number;
@@ -66,7 +91,24 @@ type Overview = {
   season: { id: string; name: string; end: string };
 };
 type BoardRow = Player & { rating: number; games: number; wins: number };
-type Profile = {
+export type Profile = {
+  favorites?: Game[];
+  rankHistory?: { rating: number; season_id: string; created_at: string }[];
+  seasons?: {
+    season_id: string;
+    rating: number;
+    games: number;
+    wins: number;
+  }[];
+  rivals?: {
+    id: string;
+    username: string;
+    accent: string;
+    played: number;
+    wins: number;
+    losses: number;
+  }[];
+  progression: Progression;
   player: Player;
   rating: { rating: number; games: number; wins: number };
   stats: { played: number; wins: number; draws: number; best: number };
@@ -82,10 +124,11 @@ type Profile = {
     score: number;
     opponent: string;
     opponent_score: number;
+    details?: import("@/lib/frontier").RoundRecord[];
     rating_change: number;
   }[];
 };
-type Tournament = {
+export type Tournament = {
   id: string;
   name: string;
   game: Game;
@@ -103,7 +146,8 @@ type Tournament = {
   }[];
 };
 const nav = [
-  { id: "arena", label: "The arena", icon: Gamepad2 },
+  { id: "dashboard", label: "Home", icon: Activity },
+  { id: "arena", label: "Game library", icon: Gamepad2 },
   { id: "leaderboard", label: "Leaderboard", icon: Trophy },
   { id: "tournaments", label: "Tournaments", icon: Swords },
   { id: "profile", label: "Your profile", icon: User },
@@ -130,14 +174,15 @@ export default function DuelZone() {
   const [profile, setProfile] = useState<Profile | null>(null),
     [ownProfile, setOwnProfile] = useState<Profile | null>(null),
     [profileId, setProfileId] = useState<string | null>(null);
-  const [game, setGame] = useState<Game>("reaction"),
+  const [game, setGame] = useState<Game>("knockout"),
     [mode, setMode] = useState<"ranked" | "casual">("ranked"),
     [practice, setPractice] = useState<Game | null>(null);
   const [auth, setAuth] = useState<"login" | "register" | null>(null),
     [help, setHelp] = useState(false),
     [createTournament, setCreateTournament] = useState(false);
+  const [aiPicker, setAiPicker] = useState(false);
   const [queue, setQueue] = useState<{
-      game: Game;
+      game: Game | "any";
       at: number;
       invite?: string;
     } | null>(null),
@@ -149,6 +194,8 @@ export default function DuelZone() {
     [now, setNow] = useState(Date.now()),
     [search, setSearch] = useState("");
   const socket = useRef<Socket | null>(null);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
   const pendingRef = useRef<Pending | null>(null);
   pendingRef.current = pending;
   const notify = useCallback((message: string) => setToast(message), []);
@@ -166,6 +213,7 @@ export default function DuelZone() {
       const next = location.hash.slice(1);
       if (
         [
+          "dashboard",
           "arena",
           "leaderboard",
           "tournaments",
@@ -178,7 +226,13 @@ export default function DuelZone() {
     }
     read();
     window.addEventListener("hashchange", read);
-    const invite = new URLSearchParams(location.search).get("invite");
+    const parameters = new URLSearchParams(location.search);
+    const sharedPlayer = parameters.get("player");
+    if (sharedPlayer && /^[a-f0-9-]{36}$/.test(sharedPlayer)) {
+      setProfileId(sharedPlayer);
+      setView("profile");
+    }
+    const invite = parameters.get("invite");
     if (invite) {
       setPending({ invite });
       history.replaceState(null, "", location.pathname + location.hash);
@@ -186,6 +240,7 @@ export default function DuelZone() {
     api("/me")
       .then((data) => {
         setUser(data.player);
+        if (data.player && !location.hash) setView("dashboard");
         if (invite && !data.player) setAuth("login");
       })
       .catch((e) => notify(e.message))
@@ -240,11 +295,31 @@ export default function DuelZone() {
   }, [profileId, user, tick, notify]);
   useEffect(() => {
     if (!user) return;
-    const s = io({ transports: ["websocket"], reconnection: true });
+    const s = io({
+      transports: ["websocket"],
+      reconnection: true,
+      auth: { frames: true },
+    });
     socket.current = s;
-    s.on("connect", () => setConnected(true));
+    const ping = () => {
+      const at = performance.now();
+      if (s.connected)
+        s.timeout(1500).volatile.emit("clock", (error: Error | null) => {
+          if (!error) network.rtt = performance.now() - at;
+        });
+    };
+    const pingTimer = setInterval(ping, 4000);
+    s.on("connect", () => {
+      setConnected(true);
+      ping();
+    });
+    s.on("frame", matchFeed.frame);
     s.on("disconnect", () => {
       setConnected(false);
+      if (queueRef.current)
+        notify(
+          "Connection lost. Your search was cancelled. Reconnect and try again.",
+        );
       setQueue(null);
     });
     s.on("connect_error", (e: Error) => {
@@ -254,6 +329,7 @@ export default function DuelZone() {
     });
     s.on("match", (state: MatchState) => {
       if (!state) return;
+      matchFeed.publish(state);
       setMatch(state);
       setQueue(null);
       if (state.phase === "finished") setTick((t) => t + 1);
@@ -261,12 +337,14 @@ export default function DuelZone() {
     s.on("lobby", (data) => setOverview((o) => ({ ...o, ...data })));
     s.on("refresh", () => setTick((t) => t + 1));
     s.on("notice", notify);
+    s.on("queue:cancelled", () => setQueue(null));
     s.on("replaced", () =>
       notify(
         "Your account connected in another tab. Use that tab for multiplayer.",
       ),
     );
     return () => {
+      clearInterval(pingTimer);
       s.disconnect();
       socket.current = null;
       setConnected(false);
@@ -300,11 +378,19 @@ export default function DuelZone() {
       }),
     [],
   );
+  const platform = usePlatform(user?.id, socket.current, connected, command);
+  const [social, setSocial] = useState<SocialState | null>(null);
   const begin = useCallback(
     async (action: Pending) => {
       setBusy(true);
       try {
-        if ("invite" in action) {
+        if ("ai" in action) {
+          await command("ai:start", {
+            game: action.ai,
+            difficulty: action.difficulty,
+          });
+          setAiPicker(false);
+        } else if ("invite" in action) {
           await command("invite:join", { code: action.invite });
         } else if (action.mode === "friend") {
           const result = await command("invite:create", { game: action.game });
@@ -334,7 +420,7 @@ export default function DuelZone() {
     }
   }, [user, connected, pending, begin]);
   function play(
-    selected = game,
+    selected: Game | "any" = game,
     selectedMode: "ranked" | "casual" | "friend" = mode,
   ) {
     const action = { game: selected, mode: selectedMode };
@@ -406,9 +492,9 @@ export default function DuelZone() {
         ),
       )
     : 100;
-  const GameIcon = gameIcons[game];
   const pageTitle = {
-    arena: "The arena",
+    dashboard: "Your dashboard",
+    arena: "Game library",
     leaderboard: "Leaderboard",
     tournaments: "Tournaments",
     profile: "Player profile",
@@ -454,7 +540,13 @@ export default function DuelZone() {
           </thead>
           <tbody>
             {rows.map((p, i) => (
-              <tr key={p.id}>
+              <motion.tr
+                layout="position"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.2 }}
+                key={p.id}
+              >
                 <td className={i < 3 ? "top-place" : ""}>
                   {String(board.indexOf(p) + 1 || i + 1).padStart(2, "0")}
                 </td>
@@ -479,14 +571,16 @@ export default function DuelZone() {
                     {rankFor(p.rating).name}
                   </span>
                 </td>
-                <td className="mono bright">{p.rating.toLocaleString()}</td>
+                <td className="mono bright">
+                  <AnimatedNumber value={p.rating} />
+                </td>
                 {!compact && (
                   <>
                     <td>{p.games}</td>
                     <td>{Math.round((p.wins / p.games) * 100)}%</td>
                   </>
                 )}
-              </tr>
+              </motion.tr>
             ))}
           </tbody>
         </table>
@@ -516,1063 +610,1162 @@ export default function DuelZone() {
   }
 
   return (
-    <div className="app-shell">
-      <a href="#main" className="skip-link">
-        Skip to content
-      </a>
-      {mobile && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Close navigation"
-          onClick={() => setMobile(false)}
-        />
-      )}
-      <aside
-        className={`sidebar ${mobile ? "open" : ""}`}
-        inert={Boolean(
-          match || auth || practice || help || queue || createTournament,
-        )}
-      >
-        <a
-          href="#arena"
-          className="wordmark brand"
-          onClick={() => navigate("arena")}
-        >
-          <span className="brand-mark">
-            <i />
-            <i />
-          </span>
-          DUELZONE<span className="brand-period">®</span>
+    <MotionConfig reducedMotion="user">
+      <div className="app-shell">
+        <a href="#main" className="skip-link">
+          Skip to content
         </a>
-        <div className="workspace-label">THE COMPETITIVE PLAYGROUND</div>
-        <div className="nav-group-label">PLAY & COMPETE</div>
-        <nav aria-label="Main navigation">
-          {nav.map((item) => (
-            <a
-              key={item.id}
-              href={`#${item.id}`}
-              className={`nav-item ${view === item.id ? "active" : ""}`}
-              onClick={() => navigate(item.id)}
-              aria-current={view === item.id ? "page" : undefined}
-            >
-              <item.icon size={18} />
-              <span>{item.label}</span>
-              {view === item.id && <i />}
-            </a>
-          ))}
-        </nav>
-        <div className="sidebar-season">
-          <div className="season-icon">
-            <Shield size={26} strokeWidth={1.2} />
-          </div>
-          <p className="eyebrow">{overview.season.name}</p>
-          <h3>A fresh chance to rise.</h3>
-          <p>
-            One opponent. One match.
-            <br />
-            One step closer.
-          </p>
+        {mobile && (
           <button
-            className="text-button"
-            onClick={() => navigate("leaderboard")}
-          >
-            Explore the ranks
-            <ArrowUpRight size={15} />
-          </button>
-        </div>
-        <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setHelp(true)}>
-            <Info size={18} />
-            How to play
-            <ArrowUpRight size={14} />
-          </button>
-          <button
-            className={`nav-item ${view === "settings" ? "active" : ""}`}
-            onClick={() => navigate("settings")}
-          >
-            <Settings size={18} />
-            Settings
-          </button>
-          <div className="server-status">
-            <i className={`status-dot ${serverUp ? "" : "offline"}`} />
-            {serverUp ? "All systems operational" : "Connecting to server"}
-          </div>
-        </div>
-      </aside>
-      <div
-        className="main-shell"
-        inert={Boolean(
-          match || auth || practice || help || queue || createTournament,
+            className="sidebar-scrim"
+            aria-label="Close navigation"
+            onClick={() => setMobile(false)}
+          />
         )}
-      >
-        <header className="topbar">
-          <div className="topbar-left">
+        <aside
+          className={`sidebar ${mobile ? "open" : ""}`}
+          inert={Boolean(
+            match ||
+              auth ||
+              practice ||
+              help ||
+              queue ||
+              createTournament ||
+              aiPicker,
+          )}
+        >
+          <a
+            href="#arena"
+            className="wordmark brand"
+            onClick={() => navigate("arena")}
+          >
+            <Brand />
+          </a>
+          <div className="workspace-label">Play. Compete. Connect.</div>
+          <div className="nav-group-label">Discover</div>
+          <nav aria-label="Main navigation">
+            {nav
+              .filter((item) => user || item.id !== "dashboard")
+              .map((item) => (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  className={`nav-item ${view === item.id ? "active" : ""}`}
+                  onClick={() => navigate(item.id)}
+                  aria-current={view === item.id ? "page" : undefined}
+                >
+                  <item.icon size={18} />
+                  <span>{item.label}</span>
+                  {view === item.id && <i />}
+                </a>
+              ))}
+          </nav>
+          <div className="sidebar-season">
+            <div className="season-icon">
+              <Shield size={26} strokeWidth={1.2} />
+            </div>
+            <p className="eyebrow">{overview.season.name}</p>
+            <h3>A fresh chance to rise.</h3>
+            <p>
+              One opponent. One match.
+              <br />
+              One step closer.
+            </p>
             <button
-              className="icon-button mobile-menu"
-              onClick={() => setMobile(true)}
-              aria-label="Open navigation"
+              className="text-button"
+              onClick={() => navigate("leaderboard")}
             >
-              <Menu size={21} />
+              Explore the ranks
+              <ArrowUpRight size={15} />
             </button>
-            <span className="breadcrumb">PLAY</span>
-            <ChevronRight size={13} />
-            <strong>{pageTitle}</strong>
           </div>
-          <div className="topbar-right">
-            <span className="online-count">
-              <i className="status-dot" />
-              {serverUp ? overview.online.toLocaleString() : "—"} online
-            </span>
-            <span className="topbar-divider" />
-            {user ? (
-              <button
-                className="account-button"
-                onClick={() => navigate("profile")}
-              >
-                <span
-                  className="avatar small-avatar"
-                  style={{ color: user.accent, background: `${user.accent}18` }}
-                >
-                  {user.username.slice(0, 2).toUpperCase()}
-                </span>
-                <span>
-                  {user.username}
-                  <small>
-                    {currentRank.name} · {rating} RP
-                  </small>
-                </span>
-                <ChevronRight size={15} />
-              </button>
-            ) : (
-              <>
-                <button
-                  className="text-button sign-in"
-                  onClick={() => setAuth("login")}
-                >
-                  Sign in
-                </button>
-                <button
-                  className="button primary compact"
-                  disabled={!loaded}
-                  onClick={() => setAuth("register")}
-                >
-                  Join DuelZone
-                  <ArrowUpRight size={15} />
-                </button>
-              </>
-            )}
-          </div>
-        </header>
-        <main id="main" tabIndex={-1}>
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={view}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -5 }}
-              transition={{ duration: 0.22 }}
+          <div className="sidebar-bottom">
+            <button className="nav-item" onClick={() => setHelp(true)}>
+              <Info size={18} />
+              How to play
+              <ArrowUpRight size={14} />
+            </button>
+            <button
+              className={`nav-item ${view === "settings" ? "active" : ""}`}
+              onClick={() => navigate("settings")}
             >
-              {view === "arena" && (
+              <Settings size={18} />
+              Settings
+            </button>
+            <div className="server-status">
+              <i className={`status-dot ${serverUp ? "" : "offline"}`} />
+              {serverUp ? "All systems operational" : "Connecting to server"}
+            </div>
+          </div>
+        </aside>
+        <div
+          className="main-shell"
+          inert={Boolean(
+            match ||
+              auth ||
+              practice ||
+              help ||
+              queue ||
+              createTournament ||
+              aiPicker,
+          )}
+        >
+          <header className="topbar">
+            <div className="topbar-left">
+              <button
+                className="icon-button mobile-menu"
+                onClick={() => setMobile(true)}
+                aria-label="Open navigation"
+              >
+                <Menu size={21} />
+              </button>
+              <span className="breadcrumb">DuelZone</span>
+              <ChevronRight size={13} />
+              <strong>{pageTitle}</strong>
+            </div>
+            <div className="topbar-right">
+              <span className="online-count">
+                <i className="status-dot" />
+                {serverUp ? overview.online.toLocaleString() : "—"} online
+              </span>
+              {user && (
+                <PartyPanel
+                  user={user}
+                  state={platform.state}
+                  social={social}
+                  command={command}
+                  connected={connected}
+                  matchId={match?.phase !== "finished" ? match?.id : undefined}
+                />
+              )}
+              {user && (
+                <NotificationCenter
+                  state={platform.state}
+                  command={command}
+                  onNavigate={navigate}
+                  error={platform.error}
+                />
+              )}
+              <span className="topbar-divider" />
+              {user ? (
+                <button
+                  className="account-button"
+                  onClick={() => navigate("profile")}
+                >
+                  <span
+                    className="avatar small-avatar"
+                    style={{
+                      color: user.accent,
+                      background: `${user.accent}18`,
+                    }}
+                  >
+                    {user.avatar ? (
+                      <img src={user.avatar} alt="" />
+                    ) : (
+                      user.username.slice(0, 2).toUpperCase()
+                    )}
+                  </span>
+                  <span>
+                    {user.username}
+                    <small>
+                      {currentRank.name} · {rating} RP
+                    </small>
+                  </span>
+                  <ChevronRight size={15} />
+                </button>
+              ) : (
                 <>
-                  <div className="page-intro">
-                    <div>
-                      <p className="eyebrow">YOUR NEXT RIVAL IS OUT THERE</p>
-                      <h1>
-                        {user
-                          ? `Good to see you, ${user.username}.`
-                          : "Welcome to your proving ground."}
-                      </h1>
-                    </div>
-                    <span className="subtle-tag">
-                      <Signal size={13} />
-                      REAL-TIME 1V1
-                    </span>
-                  </div>
-                  <section className="hero">
-                    <div className="hero-copy">
-                      <span className="hero-kicker">
-                        <span />
-                        PURE SKILL. REAL COMPETITION.
-                      </span>
-                      <h2>
-                        Small margins.
-                        <br />
-                        <span>Big wins.</span>
-                      </h2>
-                      <p>
-                        No loadouts. No luck. Just you, your opponent,
-                        <br className="desktop-break" /> and the moment that
-                        makes the difference.
-                      </p>
-                      <div className="hero-actions">
+                  <button
+                    className="text-button sign-in"
+                    onClick={() => setAuth("login")}
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    className="button primary compact"
+                    disabled={!loaded}
+                    onClick={() => setAuth("register")}
+                  >
+                    Join DuelZone
+                    <ArrowUpRight size={15} />
+                  </button>
+                </>
+              )}
+            </div>
+          </header>
+          <main id="main" tabIndex={-1}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={view}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                transition={{ duration: 0.22 }}
+              >
+                {view === "dashboard" &&
+                  (ownProfile ? (
+                    <Dashboard
+                      profile={ownProfile}
+                      social={social}
+                      tournaments={tournaments}
+                      preferences={
+                        platform.state?.preferences || defaultPreferences
+                      }
+                      play={(g) => play(g, "casual")}
+                      practice={setPractice}
+                      navigate={navigate}
+                      command={command}
+                      notify={notify}
+                    />
+                  ) : user ? (
+                    <Loading />
+                  ) : (
+                    gate()
+                  ))}
+                {view === "arena" && (
+                  <>
+                    <ArenaShowcase
+                      quick={() => play("any", "casual")}
+                      challenge={() =>
+                        user
+                          ? window.dispatchEvent(new CustomEvent("dz:friends"))
+                          : setAuth("login")
+                      }
+                      ai={() => setAiPicker(true)}
+                      practice={setPractice}
+                      busy={busy}
+                    />
+                    <section className="showdown-feature">
+                      <div className="showdown-monogram" aria-hidden="true">
+                        <Brand compact />
+                        <span>V</span>
+                      </div>
+                      <div>
+                        <span className="eyebrow">The signature series</span>
+                        <h2>Five games. One champion.</h2>
+                        <p>
+                          One rival. Five disciplines. A new draw every series.
+                          Win three rounds across combat, movement, sport and
+                          tactics to take the match.
+                        </p>
+                      </div>
+                      <div>
                         <button
                           className="button primary"
-                          onClick={() => play()}
                           disabled={busy}
+                          onClick={() => play("showdown", mode)}
                         >
-                          <Zap size={17} fill="currentColor" />
-                          Quick play
-                          <ArrowUpRight size={18} />
+                          <Swords size={17} /> Enter Showdown{" "}
+                          <ArrowUpRight size={17} />
                         </button>
                         <button
-                          className="button ghost"
-                          onClick={() => play(game, "friend")}
+                          className="text-button"
+                          onClick={() => setPractice("showdown")}
                         >
-                          <Users size={17} />
-                          Challenge a friend
+                          Learn the series <ArrowRight size={16} />
                         </button>
-                      </div>
-                      <div className="hero-footnote">
-                        <span>
-                          <Shield size={13} />
-                          Skill-based matchmaking
-                        </span>
-                        <i />
-                        <span>Free to compete</span>
-                      </div>
-                    </div>
-                    <button
-                      className="hero-visual"
-                      onClick={() => setPractice("aim")}
-                      aria-label="Try the Aim Duel interactive preview"
-                    >
-                      <div className="hero-orbit orbit-one" />
-                      <div className="hero-orbit orbit-two" />
-                      <div className="hero-orbit orbit-three" />
-                      <svg
-                        viewBox="0 0 500 400"
-                        className="hero-lines"
-                        aria-hidden="true"
-                      >
-                        <path d="M0 340L500 70M70 400L500 170M0 210L420 0M-30 100L180 0" />
-                        <path className="hero-line-accent" d="M100 400L500 0" />
-                      </svg>
-                      <div className="hero-crosshair">
-                        <i />
-                        <i />
-                        <span />
-                      </div>
-                      <div className="hero-target target-back" />
-                      <div className="hero-coordinate coord-top">
-                        DZ // COMPETITIVE SYSTEMS
-                      </div>
-                      <div className="hero-coordinate coord-bottom">
-                        <span className="status-dot" />
-                        ENTER THE ZONE
-                        <ArrowUpRight size={16} />
-                      </div>
-                      <span className="visual-index">01 — 04</span>
-                    </button>
-                  </section>
-                  <section className="game-section">
-                    <div className="section-heading">
-                      <div>
-                        <p className="eyebrow">FOUR WAYS TO FIND YOUR EDGE</p>
-                        <h2>
-                          Choose your battleground
-                          <span className="count-badge">04</span>
-                        </h2>
-                      </div>
-                      <button
-                        className="text-button muted"
-                        onClick={() => setHelp(true)}
-                      >
-                        Learn the rules
-                        <ArrowUpRight size={15} />
-                      </button>
-                    </div>
-                    <div className="game-grid">
-                      {games.map((g, i) => {
-                        const Icon = gameIcons[g];
-                        return (
-                          <article
-                            key={g}
-                            className={`game-card ${game === g ? "selected" : ""}`}
-                            style={
-                              {
-                                "--game-color": GAME_INFO[g].color,
-                              } as React.CSSProperties
-                            }
-                          >
-                            <button
-                              className="game-preview"
-                              onClick={() => setPractice(g)}
-                              aria-label={`Practice ${GAME_INFO[g].name}`}
-                            >
-                              <GameArt game={g} />
-                              <span className="preview-label">
-                                Try a warm-up
-                                <ArrowUpRight size={14} />
-                              </span>
-                              <span className="game-number">0{i + 1}</span>
-                            </button>
-                            <div className="game-card-info">
-                              <div className="game-meta">
-                                <Icon size={14} />
-                                <span>
-                                  {g === "reaction"
-                                    ? "REFLEXES"
-                                    : g === "aim"
-                                      ? "ACCURACY"
-                                      : g === "speed"
-                                        ? "DECISIONS"
-                                        : "TIMING"}
-                                </span>
-                                <span>1V1</span>
-                              </div>
-                              <h3>{GAME_INFO[g].name}</h3>
-                              <p>
-                                {g === "reaction"
-                                  ? "The fastest instinct wins."
-                                  : g === "aim"
-                                    ? "Every shot is a statement."
-                                    : g === "speed"
-                                      ? "Outthink. Outpace. Outplay."
-                                      : "Control is your advantage."}
-                              </p>
-                              <button
-                                className="game-select"
-                                onClick={() => setGame(g)}
-                                aria-pressed={game === g}
-                              >
-                                {game === g ? (
-                                  <>
-                                    <Check size={14} />
-                                    Selected
-                                  </>
-                                ) : (
-                                  <>
-                                    Select game
-                                    <ArrowRight size={15} />
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
-                  <div className="play-strip">
-                    <div className="selected-game-icon">
-                      <GameIcon size={22} />
-                    </div>
-                    <div>
-                      <strong>{GAME_INFO[game].name}</strong>
-                      <span>
-                        {GAME_INFO[game].rounds} rounds ·{" "}
-                        {GAME_INFO[game].keys.toLowerCase()}
-                      </span>
-                    </div>
-                    <div className="mode-toggle" aria-label="Match type">
-                      <button
-                        aria-pressed={mode === "ranked"}
-                        className={mode === "ranked" ? "active" : ""}
-                        onClick={() => setMode("ranked")}
-                      >
-                        <Shield size={14} />
-                        Ranked
-                      </button>
-                      <button
-                        aria-pressed={mode === "casual"}
-                        className={mode === "casual" ? "active" : ""}
-                        onClick={() => setMode("casual")}
-                      >
-                        Casual
-                      </button>
-                    </div>
-                    <button
-                      className="button primary"
-                      disabled={busy}
-                      onClick={() => play()}
-                    >
-                      Find a match
-                      <ArrowRight size={17} />
-                    </button>
-                  </div>
-                  <div className="lower-grid">
-                    <section className="panel">
-                      <div className="panel-heading">
-                        <h2>
-                          <Trophy size={17} />
-                          Setting the standard
-                        </h2>
-                        <button
-                          className="text-button muted"
-                          onClick={() => navigate("leaderboard")}
-                        >
-                          Full leaderboard
-                          <ArrowUpRight size={15} />
-                        </button>
-                      </div>
-                      {boardTable(board.slice(0, 5), true)}
-                      <div className="panel-footer">
-                        <span className="status-dot" />
-                        {overview.season.name}
-                        <span>Updated from completed ranked matches</span>
                       </div>
                     </section>
-                    <section className="rank-panel">
-                      <div className="rank-top">
-                        <span className="eyebrow">YOUR CLIMB STARTS HERE</span>
-                        <ArrowUpRight size={17} />
-                      </div>
-                      <div className="rank-feature">
-                        <div className="rank-shield">
-                          <Shield size={45} strokeWidth={1} />
-                          <span>{user ? currentRank.name.charAt(0) : "I"}</span>
+                    <GameLibrary
+                      ready={!!platform.state}
+                      selected={game}
+                      onSelect={setGame}
+                      onPractice={setPractice}
+                      onPlay={(g) => {
+                        setGame(g);
+                        play(g, mode);
+                      }}
+                      onChallenge={(g) => {
+                        setGame(g);
+                        user
+                          ? window.dispatchEvent(
+                              new CustomEvent("dz:friends", {
+                                detail: { game: g },
+                              }),
+                            )
+                          : setAuth("login");
+                      }}
+                      mode={mode}
+                      onMode={setMode}
+                      preferences={
+                        platform.state?.preferences || defaultPreferences
+                      }
+                      save={async (prefs) => {
+                        await command("preferences:save", prefs);
+                        await platform.refresh();
+                        setTick((t) => t + 1);
+                      }}
+                      onLogin={() => setAuth("login")}
+                      profile={ownProfile}
+                    />
+                    <div className="lower-grid">
+                      <section className="panel">
+                        <div className="panel-heading">
+                          <h2>
+                            <Trophy size={17} />
+                            Setting the standard
+                          </h2>
+                          <button
+                            className="text-button muted"
+                            onClick={() => navigate("leaderboard")}
+                          >
+                            Full leaderboard
+                            <ArrowUpRight size={15} />
+                          </button>
                         </div>
-                        <div>
-                          <p>{user ? currentRank.name : "Make your mark."}</p>
+                        {boardTable(board.slice(0, 5), true)}
+                        <div className="panel-footer">
+                          <span className="status-dot" />
+                          {overview.season.name}
+                          <span>Updated from completed ranked matches</span>
+                        </div>
+                      </section>
+                      <section className="rank-panel">
+                        <div className="rank-top">
+                          <span className="eyebrow">Your ranked journey</span>
+                          <ArrowUpRight size={17} />
+                        </div>
+                        <div className="rank-feature">
+                          <div className="rank-shield">
+                            <Shield size={45} strokeWidth={1} />
+                            <span>
+                              {user ? currentRank.name.charAt(0) : "I"}
+                            </span>
+                          </div>
+                          <div>
+                            <p>{user ? currentRank.name : "Make your mark."}</p>
+                            <span>
+                              {user
+                                ? `${rating.toLocaleString()} rating points`
+                                : "From Bronze to Champion."}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="rank-track">
+                          <div style={{ width: `${user ? progress : 0}%` }} />
+                        </div>
+                        <div className="rank-progress-label">
+                          <span>{user ? currentRank.name : "Bronze"}</span>
                           <span>
                             {user
-                              ? `${rating.toLocaleString()} rating points`
-                              : "From Bronze to Champion."}
+                              ? nextRank
+                                ? `${nextRank.min - rating} RP to ${nextRank.name}`
+                                : "Champion reached"
+                              : "Champion"}
                           </span>
                         </div>
-                      </div>
-                      <div className="rank-track">
-                        <div style={{ width: `${user ? progress : 0}%` }} />
-                      </div>
-                      <div className="rank-progress-label">
-                        <span>{user ? currentRank.name : "Bronze"}</span>
-                        <span>
+                        <p className="rank-description">
                           {user
-                            ? nextRank
-                              ? `${nextRank.min - rating} RP to ${nextRank.name}`
-                              : "Champion reached"
-                            : "Champion"}
+                            ? "Show up. Stay sharp. Let your skill do the talking."
+                            : "Your rank is earned, never given. Start with one match and see how far you can go."}
+                        </p>
+                        <button
+                          className="text-button accent"
+                          onClick={() =>
+                            user ? navigate("profile") : setAuth("register")
+                          }
+                        >
+                          {user ? "View your progress" : "Start your journey"}
+                          <ArrowRight size={15} />
+                        </button>
+                      </section>
+                    </div>
+                    <div className="arena-footer">
+                      <span>Made for the next match.</span>
+                      <div>
+                        <span>{games.length} competitive games</span>
+                        <i />
+                        <span>Real opponents</span>
+                        <i />
+                        <span>Zero pay-to-win</span>
+                      </div>
+                      <span>DUELZONE © {new Date().getFullYear()}</span>
+                    </div>
+                  </>
+                )}
+                {view === "leaderboard" && (
+                  <>
+                    <PageHeading
+                      eyebrow="Ranked competition"
+                      title="The leaderboard."
+                      description="The players setting the pace this season. Your next match could change the order."
+                    />
+                    <div className="leaderboard-banner">
+                      <Shield size={40} strokeWidth={1} />
+                      <div>
+                        <span className="eyebrow">Current season</span>
+                        <h2>{overview.season.name}</h2>
+                      </div>
+                      <div className="banner-stat">
+                        <strong>{board.length}</strong>
+                        <span>
+                          ranked players
+                          {board.length === 100 ? " · top 100" : ""}
                         </span>
                       </div>
-                      <p className="rank-description">
-                        {user
-                          ? "Show up. Stay sharp. Let your skill do the talking."
-                          : "Your rank is earned, never given. Start with one match and see how far you can go."}
-                      </p>
-                      <button
-                        className="text-button accent"
-                        onClick={() =>
-                          user ? navigate("profile") : setAuth("register")
-                        }
-                      >
-                        {user ? "View your progress" : "Start your journey"}
-                        <ArrowRight size={15} />
-                      </button>
-                    </section>
-                  </div>
-                  <div className="arena-footer">
-                    <span>BUILT FOR THE COMPETITIVE SPIRIT.</span>
-                    <div>
-                      <span>4 skill games</span>
-                      <i />
-                      <span>Real opponents</span>
-                      <i />
-                      <span>Zero pay-to-win</span>
-                    </div>
-                    <span>DUELZONE © {new Date().getFullYear()}</span>
-                  </div>
-                </>
-              )}
-              {view === "leaderboard" && (
-                <>
-                  <PageHeading
-                    eyebrow="EARN YOUR PLACE"
-                    title="The best rise to the top."
-                    description="Every point earned against a real opponent. Every position worth defending."
-                  />
-                  <div className="leaderboard-banner">
-                    <Shield size={40} strokeWidth={1} />
-                    <div>
-                      <span className="eyebrow">CURRENT COMPETITION</span>
-                      <h2>{overview.season.name}</h2>
-                    </div>
-                    <div className="banner-stat">
-                      <strong>{board.length}</strong>
-                      <span>
-                        ranked players{board.length === 100 ? " · top 100" : ""}
-                      </span>
-                    </div>
-                    <div className="banner-stat">
-                      <strong>
-                        {overview.season.end
-                          ? Math.max(
-                              0,
-                              Math.ceil(
-                                (new Date(overview.season.end).getTime() -
-                                  now) /
-                                  86400000,
-                              ),
-                            )
-                          : "—"}
-                      </strong>
-                      <span>days remaining</span>
-                    </div>
-                    <button
-                      className="button primary"
-                      onClick={() => play(game, "ranked")}
-                    >
-                      Play ranked
-                      <ArrowRight size={16} />
-                    </button>
-                  </div>
-                  <div className="rank-tiers">
-                    {RANKS.map((r, i) => (
-                      <div key={r.name}>
-                        <Shield size={20} style={{ opacity: 0.4 + i * 0.1 }} />
-                        <strong>{r.name}</strong>
-                        <span>{r.min}+ RP</span>
+                      <div className="banner-stat">
+                        <strong>
+                          {overview.season.end
+                            ? Math.max(
+                                0,
+                                Math.ceil(
+                                  (new Date(overview.season.end).getTime() -
+                                    now) /
+                                    86400000,
+                                ),
+                              )
+                            : "—"}
+                        </strong>
+                        <span>days remaining</span>
                       </div>
-                    ))}
-                  </div>
-                  <section className="panel full">
-                    <div className="panel-heading">
-                      <h2>Global standings</h2>
-                      <label className="search-box">
-                        <Search size={16} />
-                        <input
-                          aria-label="Search players"
-                          placeholder="Find a player"
-                          value={search}
-                          onChange={(e) => setSearch(e.target.value)}
-                        />
-                      </label>
-                    </div>
-                    {boardTable(
-                      board.filter((p) =>
-                        p.username.toLowerCase().includes(search.toLowerCase()),
-                      ),
-                    )}
-                  </section>
-                  <p className="small muted footnote">
-                    Ratings start at 1,000. Ranked results use Elo; casual and
-                    friend matches do not change your rating. Seasons reset
-                    quarterly, while match history stays on your profile.
-                  </p>
-                </>
-              )}
-              {view === "tournaments" && (
-                <>
-                  <PageHeading
-                    eyebrow="RAISE THE STAKES"
-                    title="Four players. One champion."
-                    description="Create a four-player knockout, gather your rivals and settle it in the arena."
-                    action={
                       <button
                         className="button primary"
-                        onClick={() =>
-                          user ? setCreateTournament(true) : setAuth("register")
-                        }
+                        onClick={() => play(game, "ranked")}
                       >
-                        <Plus size={17} />
-                        Create tournament
+                        Play ranked
+                        <ArrowRight size={16} />
                       </button>
-                    }
-                  />
-                  <div className="tournament-explainer">
-                    <span>
-                      01 <b>Gather your four</b>
-                    </span>
-                    <ArrowRight size={18} />
-                    <span>
-                      02 <b>Win the semifinals</b>
-                    </span>
-                    <ArrowRight size={18} />
-                    <span>
-                      03 <b>Take the title</b>
-                    </span>
-                  </div>
-                  {tournaments.length ? (
-                    <div className="tournament-grid">
-                      {tournaments.map((t) => (
-                        <article className="tournament-card" key={t.id}>
-                          <div className="tournament-top">
-                            <span
-                              className={`status-pill ${t.status === "open" ? "accent" : ""}`}
-                            >
-                              {t.status}
-                            </span>
-                            <span>{GAME_INFO[t.game].name}</span>
-                          </div>
-                          <h2>{t.name}</h2>
-                          <p className="muted small">
-                            Hosted by {t.host} · {t.entrants.length}/4 players
-                          </p>
-                          <div className="entrant-list">
-                            {[0, 1, 2, 3].map((i) => (
-                              <div key={i}>
-                                <span
-                                  className="avatar small-avatar"
-                                  style={{ color: t.entrants[i]?.accent }}
-                                >
-                                  {t.entrants[i]?.username
-                                    .slice(0, 2)
-                                    .toUpperCase() || <Plus size={14} />}
-                                </span>
-                                <span>
-                                  {t.entrants[i]?.username || "Open slot"}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                          {t.fixtures.length > 0 && (
-                            <div className="bracket">
-                              {t.fixtures.map((f) => (
-                                <div key={`${f.round}-${f.slot}`}>
-                                  <span>
-                                    {f.round === 1
-                                      ? `SEMIFINAL ${f.slot + 1}`
-                                      : "FINAL"}
+                    </div>
+                    <div className="rank-tiers">
+                      {RANKS.map((r) => (
+                        <div key={r.name}>
+                          <RankCrest rating={r.min} size={32} />
+                          <strong>{r.name}</strong>
+                          <span>{r.min}+ RP</span>
+                        </div>
+                      ))}
+                    </div>
+                    {board.length > 0 && (
+                      <div className="podium" aria-label="Season leaders">
+                        {board.slice(0, 3).map((p, i) => (
+                          <button
+                            key={p.id}
+                            className={`podium-player place-${i + 1}`}
+                            onClick={() => showProfile(p.id)}
+                          >
+                            <span className="podium-position">0{i + 1}</span>
+                            <PlayerAvatar player={p} />
+                            <div>
+                              <span>
+                                {i === 0
+                                  ? "Season leader"
+                                  : rankFor(p.rating).name}
+                              </span>
+                              <strong>{p.username}</strong>
+                              <small>
+                                {p.wins} wins · {p.games} ranked matches
+                              </small>
+                            </div>
+                            <b>
+                              {p.rating.toLocaleString()}
+                              <small>RP</small>
+                            </b>
+                            <ArrowUpRight size={16} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <section className="panel full">
+                      <div className="panel-heading">
+                        <h2>Global standings</h2>
+                        <label className="search-box">
+                          <Search size={16} />
+                          <input
+                            aria-label="Search players"
+                            placeholder="Find a player"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                          />
+                        </label>
+                      </div>
+                      {boardTable(
+                        board.filter((p) =>
+                          p.username
+                            .toLowerCase()
+                            .includes(search.toLowerCase()),
+                        ),
+                      )}
+                    </section>
+                    <p className="small muted footnote">
+                      Ratings start at 1,000. Ranked results use Elo; casual and
+                      friend matches do not change your rating. Seasons reset
+                      quarterly, while match history stays on your profile.
+                    </p>
+                  </>
+                )}
+                {view === "tournaments" && (
+                  <>
+                    <PageHeading
+                      eyebrow="Tournaments"
+                      title="Four players. One champion."
+                      description="Create a four-player knockout, gather your rivals and settle it in the arena."
+                      action={
+                        <button
+                          className="button primary"
+                          onClick={() =>
+                            user
+                              ? setCreateTournament(true)
+                              : setAuth("register")
+                          }
+                        >
+                          <Plus size={17} />
+                          Create tournament
+                        </button>
+                      }
+                    />
+                    <TournamentInvitations
+                      state={platform.state}
+                      command={command}
+                      notify={notify}
+                    />
+                    <div className="tournament-explainer">
+                      <div className="tournament-crest" aria-hidden="true">
+                        <Brand compact />
+                        <span>IV</span>
+                      </div>
+                      <span>
+                        01 <b>Gather your four</b>
+                      </span>
+                      <ArrowRight size={18} />
+                      <span>
+                        02 <b>Win the semifinals</b>
+                      </span>
+                      <ArrowRight size={18} />
+                      <span>
+                        03 <b>Take the title</b>
+                      </span>
+                    </div>
+                    {tournaments.length ? (
+                      <div className="tournament-grid">
+                        {tournaments.map((t) => (
+                          <article className="tournament-card" key={t.id}>
+                            <div className="tournament-top">
+                              <span
+                                className={`status-pill ${t.status === "open" ? "accent" : ""}`}
+                              >
+                                {t.status}
+                              </span>
+                              <span>{GAME_INFO[t.game].name}</span>
+                            </div>
+                            <h2>{t.name}</h2>
+                            <p className="muted small">
+                              Hosted by {t.host} · {t.entrants.length}/4 players
+                            </p>
+                            <div className="entrant-list">
+                              {[0, 1, 2, 3].map((i) => (
+                                <div key={i}>
+                                  <span
+                                    className="avatar small-avatar"
+                                    style={{ color: t.entrants[i]?.accent }}
+                                  >
+                                    {t.entrants[i]?.username
+                                      .slice(0, 2)
+                                      .toUpperCase() || <Plus size={14} />}
                                   </span>
-                                  <b>
-                                    {f.name_a} <small>vs</small> {f.name_b}
-                                  </b>
-                                  <em>
-                                    {f.winner
-                                      ? `${f.winner} advances`
-                                      : "In progress"}
-                                  </em>
+                                  <span>
+                                    {t.entrants[i]?.username || "Open slot"}
+                                  </span>
                                 </div>
                               ))}
                             </div>
-                          )}
-                          {t.winner && (
-                            <div className="tournament-winner">
-                              <Trophy size={18} />
-                              {t.winner} takes the title
-                            </div>
-                          )}
-                          {t.status === "open" && (
-                            <div className="tournament-actions">
-                              {t.entrants.some((p) => p.id === user?.id) ? (
-                                <>
-                                  <span className="small muted">
-                                    <Check size={14} />
-                                    You’re in
-                                  </span>
-                                  {t.host_id === user?.id && (
+                            {t.fixtures.length > 0 && (
+                              <div className="bracket">
+                                {t.fixtures.map((f) => (
+                                  <div key={`${f.round}-${f.slot}`}>
+                                    <span>
+                                      {f.round === 1
+                                        ? `SEMIFINAL ${f.slot + 1}`
+                                        : "FINAL"}
+                                    </span>
+                                    <b>
+                                      {f.name_a} <small>vs</small> {f.name_b}
+                                    </b>
+                                    <em>
+                                      {f.winner
+                                        ? `${f.winner} advances`
+                                        : "In progress"}
+                                    </em>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {t.winner && (
+                              <div className="tournament-winner">
+                                <Trophy size={18} />
+                                {t.winner} takes the title
+                              </div>
+                            )}
+                            {t.status === "open" &&
+                              t.entrants.length < 4 &&
+                              t.entrants.some((p) => p.id === user?.id) && (
+                                <TournamentInviteButton
+                                  tournament={t}
+                                  social={social}
+                                  command={command}
+                                  notify={notify}
+                                />
+                              )}
+                            {t.status === "open" && (
+                              <div className="tournament-actions">
+                                {t.entrants.some((p) => p.id === user?.id) ? (
+                                  <>
+                                    <span className="small muted">
+                                      <Check size={14} />
+                                      You’re in
+                                    </span>
+                                    {t.host_id === user?.id && (
+                                      <button
+                                        className="button primary compact"
+                                        disabled={
+                                          busy ||
+                                          t.entrants.length !== 4 ||
+                                          !connected
+                                        }
+                                        onClick={() =>
+                                          void tournamentAction(t.id, "start")
+                                        }
+                                      >
+                                        Start tournament
+                                      </button>
+                                    )}
                                     <button
-                                      className="button primary compact"
-                                      disabled={
-                                        busy ||
-                                        t.entrants.length !== 4 ||
-                                        !connected
-                                      }
+                                      className="text-button muted"
+                                      disabled={busy}
                                       onClick={() =>
-                                        void tournamentAction(t.id, "start")
+                                        void tournamentAction(t.id, "leave")
                                       }
                                     >
-                                      Start tournament
+                                      {t.host_id === user?.id
+                                        ? "Cancel"
+                                        : "Leave"}
                                     </button>
-                                  )}
+                                  </>
+                                ) : (
                                   <button
-                                    className="text-button muted"
-                                    disabled={busy}
+                                    className="button secondary"
+                                    disabled={busy || t.entrants.length === 4}
                                     onClick={() =>
-                                      void tournamentAction(t.id, "leave")
+                                      void tournamentAction(t.id, "join")
                                     }
                                   >
-                                    {t.host_id === user?.id
-                                      ? "Cancel"
-                                      : "Leave"}
+                                    Join tournament
+                                    <ArrowRight size={15} />
                                   </button>
-                                </>
-                              ) : (
-                                <button
-                                  className="button secondary"
-                                  disabled={busy || t.entrants.length === 4}
-                                  onClick={() =>
-                                    void tournamentAction(t.id, "join")
-                                  }
-                                >
-                                  Join tournament
-                                  <ArrowRight size={15} />
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="panel empty-state tall">
-                      <Swords size={40} />
-                      <h2>Make the first move.</h2>
-                      <p>
-                        No tournaments yet. Create one and bring three rivals.
-                        <br />
-                        All players must be signed in and online when the host
-                        starts.
-                      </p>
-                      <button
-                        className="button primary"
-                        onClick={() =>
-                          user ? setCreateTournament(true) : setAuth("register")
-                        }
-                      >
-                        <Plus size={16} />
-                        Create a tournament
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-              {view === "profile" && (
-                <>
-                  {!user && !profileId ? (
-                    gate()
-                  ) : !profile ? (
-                    <Loading />
-                  ) : (
-                    <>
-                      <div className="profile-hero">
-                        <span
-                          className="avatar profile-avatar"
-                          style={{
-                            color: profile.player.accent,
-                            background: `${profile.player.accent}15`,
-                          }}
-                        >
-                          {profile.player.username.slice(0, 2).toUpperCase()}
-                        </span>
-                        <div>
-                          <span className="eyebrow">DUELZONE PLAYER</span>
-                          <h1>{profile.player.username}</h1>
-                          <p>
-                            {profile.player.bio ||
-                              "Let the score do the talking."}
-                          </p>
-                        </div>
-                        <span className="profile-rank">
-                          <Shield size={25} />
-                          {rankFor(profile.rating.rating).name}
-                          <small>{profile.rating.rating} RP</small>
-                        </span>
-                        {profile.player.id === user?.id && (
-                          <button
-                            className="button secondary compact"
-                            onClick={() => navigate("settings")}
-                          >
-                            Edit profile
-                          </button>
-                        )}
-                      </div>
-                      <div className="stat-grid">
-                        {[
-                          {
-                            label: "MATCHES PLAYED",
-                            value: profile.stats.played,
-                          },
-                          { label: "WINS", value: profile.stats.wins },
-                          {
-                            label: "WIN RATE",
-                            value: `${profile.stats.played ? Math.round((profile.stats.wins / profile.stats.played) * 100) : 0}%`,
-                          },
-                          { label: "DRAWS", value: profile.stats.draws },
-                        ].map((s) => (
-                          <div className="stat-card" key={s.label}>
-                            <span className="eyebrow">{s.label}</span>
-                            <strong>{s.value}</strong>
-                          </div>
+                                )}
+                              </div>
+                            )}
+                          </article>
                         ))}
                       </div>
-                      <div className="section-heading">
-                        <h2>Your game. By the numbers.</h2>
-                        <span className="muted small">
-                          Personal records · total match points
-                        </span>
+                    ) : (
+                      <div className="panel empty-state tall">
+                        <Swords size={40} />
+                        <h2>Make the first move.</h2>
+                        <p>
+                          No tournaments yet. Create one and bring three rivals.
+                          <br />
+                          All players must be signed in and online when the host
+                          starts.
+                        </p>
+                        <button
+                          className="button primary"
+                          onClick={() =>
+                            user
+                              ? setCreateTournament(true)
+                              : setAuth("register")
+                          }
+                        >
+                          <Plus size={16} />
+                          Create a tournament
+                        </button>
                       </div>
-                      <div className="record-grid">
-                        {games.map((g) => {
-                          const record = profile.records.find(
-                            (r) => r.game === g,
-                          );
-                          const Icon = gameIcons[g];
-                          return (
-                            <div className="record-card" key={g}>
-                              <Icon
-                                style={{ color: GAME_INFO[g].color }}
-                                size={24}
-                              />
-                              <h3>{GAME_INFO[g].name}</h3>
-                              <strong>
-                                {record ? record.best.toLocaleString() : "—"}
-                              </strong>
-                              <span>PERSONAL BEST</span>
-                              <p>
-                                {record
-                                  ? `${record.played} matches · ${record.wins} wins`
-                                  : "Your first record is waiting."}
-                              </p>
+                    )}
+                  </>
+                )}
+                {view === "profile" && (
+                  <>
+                    {!user && !profileId ? (
+                      gate()
+                    ) : !profile ? (
+                      <Loading />
+                    ) : (
+                      <>
+                        <div
+                          className={`profile-banner cosmetic-${profile.player.cosmetic || "graphite"}`}
+                          style={
+                            profile.player.banner
+                              ? {
+                                  backgroundImage: `url("${profile.player.banner}")`,
+                                }
+                              : undefined
+                          }
+                        >
+                          <div
+                            className="profile-banner-identity"
+                            aria-hidden="true"
+                          >
+                            <Brand />
+                            <span>{profile.progression.title}</span>
+                          </div>
+                          <span>
+                            Level {profile.progression.level} /{" "}
+                            {profile.progression.title}
+                          </span>
+                        </div>
+                        <div className="profile-hero">
+                          <PlayerAvatar
+                            player={profile.player}
+                            className="profile-avatar"
+                          />
+                          <div>
+                            <span className="eyebrow">Player profile</span>
+                            <h1>{profile.player.username}</h1>
+                            <p>
+                              {profile.player.bio ||
+                                "Let the score do the talking."}
+                            </p>
+                          </div>
+                          <span className="profile-rank">
+                            <RankCrest
+                              rating={profile.rating.rating}
+                              size={44}
+                            />
+                            {rankFor(profile.rating.rating).name}
+                            <small>{profile.rating.rating} RP</small>
+                          </span>
+                          {profile.player.id === user?.id && (
+                            <button
+                              className="button secondary compact"
+                              onClick={() => navigate("settings")}
+                            >
+                              Edit profile
+                            </button>
+                          )}
+                        </div>
+                        <ProfileExtras
+                          onConnect={() =>
+                            user
+                              ? window.dispatchEvent(
+                                  new CustomEvent("dz:friends", {
+                                    detail: {
+                                      target: profile.player.id,
+                                      query: profile.player.username,
+                                    },
+                                  }),
+                                )
+                              : setAuth("login")
+                          }
+                          profile={profile}
+                          own={profile.player.id === user?.id}
+                          onProfile={showProfile}
+                          notify={notify}
+                        />
+                        {profile.progression && (
+                          <ProgressionPanel progress={profile.progression} />
+                        )}
+                        <div className="stat-grid">
+                          {[
+                            {
+                              label: "MATCHES PLAYED",
+                              value: profile.stats.played,
+                            },
+                            { label: "WINS", value: profile.stats.wins },
+                            {
+                              label: "WIN RATE",
+                              value: `${profile.stats.played ? Math.round((profile.stats.wins / profile.stats.played) * 100) : 0}%`,
+                            },
+                            {
+                              label: "LOSSES",
+                              value:
+                                profile.stats.played -
+                                profile.stats.wins -
+                                profile.stats.draws,
+                            },
+                          ].map((s) => (
+                            <div className="stat-card" key={s.label}>
+                              <span className="eyebrow">{s.label}</span>
+                              <strong>{s.value}</strong>
                             </div>
-                          );
-                        })}
-                      </div>
-                      <HistoryTable profile={profile} />
-                    </>
-                  )}
-                </>
-              )}
-              {view === "history" && (
-                <>
-                  <PageHeading
-                    eyebrow="EVERY MATCH TELLS A STORY"
-                    title="Your track record."
-                    description="Wins, lessons and the numbers behind your progress."
-                  />
-                  {!user ? (
-                    gate()
-                  ) : ownProfile ? (
-                    <HistoryTable profile={ownProfile} />
-                  ) : (
-                    <Loading />
-                  )}
-                </>
-              )}
-              {view === "settings" && (
-                <>
-                  <PageHeading
-                    eyebrow="MAKE IT YOURS"
-                    title="Your identity. Your arena."
-                    description="Customize how you show up and keep your account secure."
-                  />
-                  {!user ? (
-                    gate()
-                  ) : (
-                    <SettingsForm
-                      user={user}
-                      onSave={(p) => {
-                        setUser(p);
-                        notify("Profile updated.");
-                      }}
-                      onPassword={() => {
-                        setTick((t) => t + 1);
-                        socket.current?.connect();
-                        notify(
-                          "Password updated. Other sessions have been signed out.",
-                        );
-                      }}
-                      onLogout={() => void logout()}
-                      notify={notify}
+                          ))}
+                        </div>
+                        <div className="section-heading">
+                          <h2>Your game. By the numbers.</h2>
+                          <span className="muted small">
+                            Personal records · total match points
+                          </span>
+                        </div>
+                        <div className="record-grid">
+                          {games.map((g) => {
+                            const record = profile.records.find(
+                              (r) => r.game === g,
+                            );
+                            const Icon = gameIcons[g];
+                            return (
+                              <div className="record-card" key={g}>
+                                <Icon
+                                  style={{ color: GAME_INFO[g].color }}
+                                  size={24}
+                                />
+                                <h3>{GAME_INFO[g].name}</h3>
+                                <strong>
+                                  {record
+                                    ? (g === "showdown"
+                                        ? record.best / 2
+                                        : record.best
+                                      ).toLocaleString()
+                                    : "—"}
+                                </strong>
+                                <span>PERSONAL BEST</span>
+                                <p>
+                                  {record
+                                    ? `${record.played} matches · ${record.wins} wins`
+                                    : "Your first record is waiting."}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <HistoryTable profile={profile} />
+                      </>
+                    )}
+                  </>
+                )}
+                {view === "history" && (
+                  <>
+                    <PageHeading
+                      eyebrow="EVERY MATCH TELLS A STORY"
+                      title="Your track record."
+                      description="Wins, lessons and the numbers behind your progress."
                     />
-                  )}
+                    {!user ? (
+                      gate()
+                    ) : ownProfile ? (
+                      <HistoryTable profile={ownProfile} />
+                    ) : (
+                      <Loading />
+                    )}
+                  </>
+                )}
+                {view === "settings" && (
+                  <>
+                    <PageHeading
+                      eyebrow="MAKE IT YOURS"
+                      title="Your identity. Your arena."
+                      description="Customize how you show up and keep your account secure."
+                    />
+                    {!user ? (
+                      gate()
+                    ) : (
+                      <>
+                        <ProfileMediaEditor
+                          user={user}
+                          profile={ownProfile}
+                          onSave={(p) => {
+                            setUser(p);
+                            setTick((t) => t + 1);
+                          }}
+                          notify={notify}
+                        />
+                        <SettingsForm
+                          user={user}
+                          onSave={(p) => {
+                            setUser(p);
+                            notify("Profile updated.");
+                          }}
+                          onPassword={() => {
+                            setTick((t) => t + 1);
+                            socket.current?.connect();
+                            notify(
+                              "Password updated. Other sessions have been signed out.",
+                            );
+                          }}
+                          onLogout={() => void logout()}
+                          notify={notify}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </main>
+        </div>
+        {auth && (
+          <Modal
+            title={auth === "register" ? "Enter the arena." : "Welcome back."}
+            onClose={() => {
+              setAuth(null);
+              setPending(null);
+            }}
+          >
+            <AuthForm
+              mode={auth}
+              onSwitch={() => setAuth(auth === "login" ? "register" : "login")}
+              onSuccess={(p) => {
+                setUser(p);
+                if (!pendingRef.current) navigate("dashboard");
+                setAuth(null);
+                setTick((t) => t + 1);
+              }}
+            />
+          </Modal>
+        )}
+        {practice && (
+          <Modal
+            title={`${GAME_INFO[practice].name} / Warm-up`}
+            wide
+            onClose={() => setPractice(null)}
+          >
+            <Practice game={practice} onClose={() => setPractice(null)} />
+          </Modal>
+        )}
+        {help && (
+          <Modal title="Find your edge." wide onClose={() => setHelp(false)}>
+            <p className="modal-description">
+              Fifteen disciplines. Find a real rival, invite a friend, or
+              practise against a clearly labelled AI opponent.
+            </p>
+            <div className="rules-list">
+              {games.map((g) => {
+                const Icon = gameIcons[g];
+                return (
+                  <div key={g}>
+                    <Icon size={25} style={{ color: GAME_INFO[g].color }} />
+                    <div>
+                      <h3>
+                        {GAME_INFO[g].name}
+                        <span>
+                          {GAME_INFO[g].rounds}{" "}
+                          {GAME_INFO[g].rounds === 1 ? "round" : "rounds"}
+                        </span>
+                      </h3>
+                      <p>{GAME_INFO[g].description}</p>
+                      <p className="small muted">
+                        {g === "reaction"
+                          ? "Space or tap after green. Early attempts score zero. Faster valid reactions earn more points."
+                          : g === "aim"
+                            ? "One shot per target. Closer to the center and faster hits score higher. A miss earns zero."
+                            : g === "speed"
+                              ? "Use keys 1–4 or the color buttons. Match the INK color, ignoring the written word."
+                              : g === "precision"
+                                ? "Space or tap to stop the marker. The closer to center, the higher the score."
+                                : GAME_INFO[g].keys}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="info-note">
+              <Shield size={20} />
+              <p>
+                Ranked matches change your Elo rating. Casual and friend matches
+                save stats without changing rank. Scores use server-received
+                inputs; connection latency can affect timing. Disconnecting for
+                20 seconds forfeits the match.
+              </p>
+            </div>
+            <button className="button primary" onClick={() => setHelp(false)}>
+              Got it. Let’s play.
+              <ArrowRight size={16} />
+            </button>
+          </Modal>
+        )}
+        {aiPicker && !match && (
+          <Modal
+            title="Find your sparring partner."
+            onClose={() => setAiPicker(false)}
+          >
+            <AIPicker
+              initial={game}
+              busy={busy}
+              onPlay={(selected, difficulty) => {
+                const action: Pending = { ai: selected, difficulty };
+                if (!user) {
+                  setAiPicker(false);
+                  setPending(action);
+                  setAuth("register");
+                } else void begin(action);
+              }}
+            />
+          </Modal>
+        )}
+        {queue && !match && (
+          <Modal
+            title={
+              queue.invite
+                ? "Your rival is one link away."
+                : "Finding your next rival."
+            }
+            onClose={() => void leaveQueue()}
+          >
+            <div className="matchmaking">
+              <div className="search-visual" aria-hidden="true">
+                <Brand compact />
+                <span />
+                <span />
+                <span />
+              </div>
+              <span className="eyebrow">
+                {queue.game === "any"
+                  ? "Quick Match · All games"
+                  : GAME_INFO[queue.game].name}
+              </span>
+              {queue.game === "any" && (
+                <div
+                  className="queue-disciplines"
+                  aria-label="Searching all game modes"
+                >
+                  {featuredGames.map((g) => (
+                    <span key={g}>{GAME_INFO[g].name}</span>
+                  ))}
+                </div>
+              )}
+              <h3>
+                {queue.invite ? "Invite a friend." : "Looking for your match"}
+              </h3>
+              <p>
+                {queue.invite
+                  ? "Share this link. The match starts when your friend joins."
+                  : queue.game === "any"
+                    ? "Searching for a real player across all games. We randomly choose a compatible discipline when you are paired."
+                    : "Waiting for a real opponent. Your match starts as soon as another player joins this queue."}
+              </p>
+              {queue.invite ? (
+                <>
+                  <label className="invite-field">
+                    <span>PRIVATE INVITE · VALID FOR 15 MINUTES</span>
+                    <input
+                      readOnly
+                      value={queue.invite}
+                      onFocus={(e) => e.target.select()}
+                    />
+                  </label>
+                  <button
+                    className="button primary"
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(queue.invite!)
+                        .then(() => notify("Invite link copied."))
+                        .catch(() =>
+                          notify(
+                            "Select the invite link and copy it manually.",
+                          ),
+                        )
+                    }
+                  >
+                    <Copy size={16} />
+                    Copy invite link
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="queue-time">
+                    {String(
+                      Math.floor(Math.max(0, now - queue.at) / 60000),
+                    ).padStart(2, "0")}
+                    :
+                    {String(
+                      Math.floor(Math.max(0, now - queue.at) / 1000) % 60,
+                    ).padStart(2, "0")}
+                  </div>
+                  <span className="small muted">
+                    {overview.online} online · {overview.queued} in matchmaking
+                  </span>
+                  <button
+                    className="text-button accent"
+                    onClick={() =>
+                      void begin({
+                        game: queue.game === "any" ? game : queue.game,
+                        mode: "friend",
+                      })
+                    }
+                  >
+                    Challenge a friend instead
+                    <ArrowRight size={15} />
+                  </button>
                 </>
               )}
-            </motion.div>
-          </AnimatePresence>
-        </main>
-      </div>
-      {auth && (
-        <Modal
-          title={auth === "register" ? "Enter the arena." : "Welcome back."}
-          onClose={() => {
-            setAuth(null);
-            setPending(null);
-          }}
-        >
-          <AuthForm
-            mode={auth}
-            onSwitch={() => setAuth(auth === "login" ? "register" : "login")}
-            onSuccess={(p) => {
-              setUser(p);
-              setAuth(null);
-              setTick((t) => t + 1);
-            }}
-          />
-        </Modal>
-      )}
-      {practice && (
-        <Modal
-          title={`${GAME_INFO[practice].name} / Warm-up`}
-          wide
-          onClose={() => setPractice(null)}
-        >
-          <Practice game={practice} onClose={() => setPractice(null)} />
-        </Modal>
-      )}
-      {help && (
-        <Modal title="Find your edge." wide onClose={() => setHelp(false)}>
-          <p className="modal-description">
-            Four skill tests. One real opponent. The highest total score wins.
-          </p>
-          <div className="rules-list">
-            {games.map((g) => {
-              const Icon = gameIcons[g];
-              return (
-                <div key={g}>
-                  <Icon size={25} style={{ color: GAME_INFO[g].color }} />
-                  <div>
-                    <h3>
-                      {GAME_INFO[g].name}
-                      <span>{GAME_INFO[g].rounds} rounds</span>
-                    </h3>
-                    <p>{GAME_INFO[g].description}</p>
-                    <p className="small muted">
-                      {g === "reaction"
-                        ? "Space or tap after green. Early attempts score zero. Faster valid reactions earn more points."
-                        : g === "aim"
-                          ? "One shot per target. Closer to the center and faster hits score higher. A miss earns zero."
-                          : g === "speed"
-                            ? "Use keys 1–4 or the color buttons. Match the INK color, ignoring the written word."
-                            : "Space or tap to stop the marker. The closer to center, the higher the score."}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="info-note">
-            <Shield size={20} />
-            <p>
-              Ranked matches change your Elo rating. Casual and friend matches
-              save stats without changing rank. Scores use server-received
-              inputs; connection latency can affect timing. Disconnecting for 20
-              seconds forfeits the match.
-            </p>
-          </div>
-          <button className="button primary" onClick={() => setHelp(false)}>
-            Got it. Let’s play.
-            <ArrowRight size={16} />
-          </button>
-        </Modal>
-      )}
-      {queue && !match && (
-        <Modal
-          title={
-            queue.invite
-              ? "Your rival is one link away."
-              : "Finding your next rival."
-          }
-          onClose={() => void leaveQueue()}
-        >
-          <div className="matchmaking">
-            <div className="radar">
-              <i />
-              <i />
-              <i />
-              <Crosshair size={32} />
+              <button
+                className="text-button muted"
+                onClick={() => void leaveQueue()}
+              >
+                Cancel {queue.invite ? "invite" : "search"}
+              </button>
             </div>
-            <span className="eyebrow">{GAME_INFO[queue.game].name}</span>
-            <h3>{queue.invite ? "Invite a friend." : "Stay sharp."}</h3>
-            <p>
-              {queue.invite
-                ? "Share this link. The match starts when your friend joins."
-                : "Waiting for a real opponent. Your match starts as soon as another player joins this queue."}
-            </p>
-            {queue.invite ? (
-              <>
-                <label className="invite-field">
-                  <span>PRIVATE INVITE · VALID FOR 15 MINUTES</span>
-                  <input
-                    readOnly
-                    value={queue.invite}
-                    onFocus={(e) => e.target.select()}
-                  />
-                </label>
-                <button
-                  className="button primary"
-                  onClick={() =>
-                    navigator.clipboard
-                      .writeText(queue.invite!)
-                      .then(() => notify("Invite link copied."))
-                      .catch(() =>
-                        notify("Select the invite link and copy it manually."),
-                      )
-                  }
-                >
-                  <Copy size={16} />
-                  Copy invite link
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="queue-time">
-                  {String(Math.floor((now - queue.at) / 60000)).padStart(
-                    2,
-                    "0",
-                  )}
-                  :
-                  {String(Math.floor((now - queue.at) / 1000) % 60).padStart(
-                    2,
-                    "0",
-                  )}
-                </div>
-                <span className="small muted">
-                  {overview.online} online · {overview.queued} in matchmaking
-                </span>
-                <button
-                  className="text-button accent"
-                  onClick={() =>
-                    void begin({ game: queue.game, mode: "friend" })
-                  }
-                >
-                  Challenge a friend instead
-                  <ArrowRight size={15} />
-                </button>
-              </>
-            )}
-            <button
-              className="text-button muted"
-              onClick={() => void leaveQueue()}
-            >
-              Cancel {queue.invite ? "invite" : "search"}
-            </button>
-          </div>
-        </Modal>
-      )}
-      {match && user && (
-        <Arena
-          state={match}
-          userId={user.id}
-          connected={connected}
-          onAction={(a) => socket.current?.emit("action", a)}
-          onLeave={() =>
-            void command("match:leave").catch((e) => notify(e.message))
-          }
-          onRematch={() =>
-            void command("rematch", { id: match.id }).catch((e) =>
-              notify(e.message),
-            )
-          }
-          onClose={() => {
-            setMatch(null);
-            setTick((t) => t + 1);
-          }}
-        />
-      )}
-      {createTournament && (
-        <Modal
-          title="Create your tournament."
-          onClose={() => setCreateTournament(false)}
-        >
-          <TournamentForm
-            onSuccess={() => {
-              setCreateTournament(false);
+          </Modal>
+        )}
+        {match && user && (
+          <Arena
+            state={match}
+            userId={user.id}
+            connected={connected}
+            onAction={(a) => {
+              if (!socket.current?.connected) return;
+              if (a.dx !== undefined) socket.current.volatile.emit("action", a);
+              else socket.current.emit("action", a);
+            }}
+            onLeave={() =>
+              void command("match:leave").catch((e) => notify(e.message))
+            }
+            onRematch={() =>
+              void command("rematch", { id: match.id }).catch((e) =>
+                notify(e.message),
+              )
+            }
+            onClose={() => {
+              setMatch(null);
               setTick((t) => t + 1);
             }}
           />
-        </Modal>
-      )}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            className="toast"
-            role="status"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-          >
-            <Info size={18} />
-            <span>{toast}</span>
-            <button
-              aria-label="Dismiss notification"
-              onClick={() => setToast("")}
-            >
-              <X size={15} />
-            </button>
-          </motion.div>
         )}
-      </AnimatePresence>
-    </div>
+        {createTournament && (
+          <Modal
+            title="Create your tournament."
+            onClose={() => setCreateTournament(false)}
+          >
+            <TournamentForm
+              onSuccess={() => {
+                setCreateTournament(false);
+                setTick((t) => t + 1);
+              }}
+            />
+          </Modal>
+        )}
+        {user && (
+          <SocialPanel
+            arenaOpen={!!match}
+            user={user}
+            socket={socket.current}
+            connected={connected}
+            command={command}
+            onProfile={showProfile}
+            onState={setSocial}
+            matchId={match?.phase !== "finished" ? match?.id : undefined}
+          />
+        )}
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              className="toast"
+              role="status"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+            >
+              <Info size={18} />
+              <span>{toast}</span>
+              <button
+                aria-label="Dismiss notification"
+                onClick={() => setToast("")}
+              >
+                <X size={15} />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </MotionConfig>
   );
 }
 
@@ -1632,11 +1825,15 @@ function AuthForm({
     }
   }
   return (
-    <form onSubmit={submit} className="form-stack">
+    <form onSubmit={submit} className="form-stack auth-form">
+      <div className="auth-brand">
+        <Brand compact />
+        <span>Your place in the arena.</span>
+      </div>
       <p className="modal-description">
         {mode === "register"
-          ? "Your skill. Your identity. Your place on the leaderboard."
-          : "Your next opponent is waiting."}
+          ? "Create your account to compete, connect and track your progress."
+          : "Sign in to pick up where you left off."}
       </p>
       {mode === "register" && (
         <label>
@@ -1821,12 +2018,30 @@ function HistoryTable({ profile }: { profile: Profile }) {
                   <td>
                     {GAME_INFO[m.game].name}
                     <small className="table-sub">{m.mode}</small>
+                    {m.game === "showdown" && m.details?.length ? (
+                      <details className="history-series">
+                        <summary>Round breakdown</summary>
+                        {m.details.map((r, i) => (
+                          <div key={i}>
+                            {i + 1}. {GAME_INFO[r.game].name} ·{" "}
+                            {Object.values(r.scores).join(" : ")}
+                          </div>
+                        ))}
+                      </details>
+                    ) : null}
                   </td>
                   <td>{m.opponent}</td>
                   <td className="mono">
-                    {m.score.toLocaleString()}{" "}
+                    {(m.game === "showdown"
+                      ? m.score / 2
+                      : m.score
+                    ).toLocaleString()}{" "}
                     <span className="muted">
-                      / {m.opponent_score.toLocaleString()}
+                      /{" "}
+                      {(m.game === "showdown"
+                        ? m.opponent_score / 2
+                        : m.opponent_score
+                      ).toLocaleString()}
                     </span>
                   </td>
                   <td className={m.rating_change > 0 ? "accent" : "muted"}>
