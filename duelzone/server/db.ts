@@ -3,8 +3,15 @@ import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { mkdirSync } from "node:fs";
-import { elo, seasonAt, type Player, type MatchState } from "../lib/shared";
+import {
+  elo,
+  seasonAt,
+  rankFor,
+  type Player,
+  type MatchState,
+} from "../lib/shared";
 import { awardProgress, getProgress } from "./progression";
+import { platformSchema, putNotification } from "./platform";
 import { socialSchema } from "./social";
 
 export interface SQL {
@@ -14,6 +21,17 @@ export interface SQL {
   ): Promise<{ rows: T[] }>;
 }
 export class Database implements SQL {
+  notificationChanged?: (id: string) => void;
+  async notify(
+    id: string,
+    kind: string,
+    body: string,
+    target?: string,
+    dedupe?: string,
+  ) {
+    await putNotification(this, id, kind, body, target, dedupe);
+    this.notificationChanged?.(id);
+  }
   private embedded?: PGlite;
   private pool?: pg.Pool;
   constructor(
@@ -84,6 +102,8 @@ export class Database implements SQL {
       await this.query(statement);
     for (const statement of socialSchema.split(";").filter((s) => s.trim()))
       await this.query(statement);
+    for (const statement of platformSchema.split(";").filter((s) => s.trim()))
+      await this.query(statement);
     await this.query(
       "ALTER TABLE matches ADD COLUMN IF NOT EXISTS details JSONB",
     );
@@ -107,7 +127,7 @@ export class Database implements SQL {
   async player(id: string): Promise<Player | undefined> {
     return (
       await this.query<Player>(
-        "SELECT id,username,accent,bio FROM users WHERE id=$1",
+        "SELECT id,username,accent,bio,cosmetic,CASE WHEN avatar<>'' THEN '/api/media/'||id||'/avatar?v='||media_version ELSE '' END AS avatar,CASE WHEN banner<>'' THEN '/api/media/'||id||'/banner?v='||media_version ELSE '' END AS banner FROM users WHERE id=$1",
         [id],
       )
     ).rows[0];
@@ -174,6 +194,31 @@ export class Database implements SQL {
             [changes[p.id], state.winner === p.id ? 1 : 0, p.id, m.season_id],
           );
       }
+      if (state.mode === "ranked")
+        for (const p of state.players) {
+          const after = (
+            await tx.query<{ rating: number }>(
+              "SELECT rating FROM ratings WHERE user_id=$1 AND season_id=$2",
+              [p.id, m.season_id],
+            )
+          ).rows[0].rating;
+          await tx.query(
+            "INSERT INTO rank_history(user_id,match_id,season_id,rating) VALUES($1,$2,$3,$4)",
+            [p.id, state.id, m.season_id, after],
+          );
+          const before = after - (changes[p.id] || 0);
+          if (rankFor(after).min > rankFor(before).min)
+            await putNotification(
+              tx,
+              p.id,
+              "promotion",
+              "Promoted to " +
+                rankFor(after).name +
+                ". Your new rank is earned.",
+              undefined,
+              "rank:" + state.id,
+            );
+        }
       await tx.query(
         "UPDATE matches SET status='finished',winner_id=$1,reason=$2,ended_at=now(),details=$4 WHERE id=$3",
         [
@@ -227,6 +272,31 @@ export class Database implements SQL {
       stats,
       records,
       progression: await getProgress(this, id),
+      favorites:
+        (
+          await this.query<{ preferences: { favorites: string[] } }>(
+            "SELECT preferences FROM player_preferences WHERE user_id=$1",
+            [id],
+          )
+        ).rows[0]?.preferences.favorites || [],
+      rankHistory: (
+        await this.query(
+          "SELECT rating,season_id,created_at FROM rank_history WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50",
+          [id],
+        )
+      ).rows.reverse(),
+      seasons: (
+        await this.query(
+          "SELECT season_id,rating,games,wins FROM ratings WHERE user_id=$1 ORDER BY season_id DESC",
+          [id],
+        )
+      ).rows,
+      rivals: (
+        await this.query(
+          "SELECT u.id,u.username,u.accent,count(*)::int AS played,count(*) FILTER(WHERE m.winner_id=$1)::int AS wins,count(*) FILTER(WHERE m.winner_id=u.id)::int AS losses FROM results a JOIN matches m ON m.id=a.match_id JOIN results b ON b.match_id=m.id AND b.user_id<>a.user_id JOIN users u ON u.id=b.user_id WHERE a.user_id=$1 AND m.status='finished' AND NOT EXISTS(SELECT 1 FROM social_blocks sb WHERE (sb.owner_id=$1 AND sb.target_id=u.id) OR (sb.target_id=$1 AND sb.owner_id=u.id)) GROUP BY u.id,u.username,u.accent ORDER BY played DESC LIMIT 8",
+          [id],
+        )
+      ).rows,
     };
   }
   async tournaments() {

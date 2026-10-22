@@ -38,7 +38,7 @@ export async function sessionPlayer(
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return;
   return (
     await db.query<Player>(
-      "SELECT u.id,u.username,u.accent,u.bio FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=$1 AND expires_at>now()",
+      "SELECT u.id,u.username,u.accent,u.bio,u.cosmetic,CASE WHEN u.avatar<>'' THEN '/api/media/'||u.id||'/avatar?v='||u.media_version ELSE '' END AS avatar,CASE WHEN u.banner<>'' THEN '/api/media/'||u.id||'/banner?v='||u.media_version ELSE '' END AS banner FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=$1 AND expires_at>now()",
       [digest(token)],
     )
   ).rows[0];

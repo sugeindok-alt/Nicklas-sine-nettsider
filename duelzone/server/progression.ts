@@ -1,3 +1,5 @@
+import { putNotification } from "./platform";
+import { weekAt, WEEKLY_GOALS } from "../lib/progression";
 import type { SQL } from "./db";
 import {
   ACHIEVEMENTS,
@@ -88,6 +90,36 @@ export async function awardProgress(sql: SQL, state: MatchState) {
         earned.push(achievement);
       }
     }
+    const weekly = await weeklyProgress(sql, id);
+    for (const goal of weekly.goals)
+      if (goal.progress >= goal.target) {
+        const added = await sql.query(
+          "INSERT INTO weekly_rewards(user_id,week,goal) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING goal",
+          [id, weekly.week, goal.id],
+        );
+        if (added.rows.length) {
+          xp += goal.xp;
+          await putNotification(
+            sql,
+            id,
+            "weekly",
+            goal.name + " completed. +" + goal.xp + " XP.",
+            undefined,
+            "weekly:" + weekly.week + ":" + goal.id,
+          );
+        }
+      }
+    for (const achievement of earned)
+      await putNotification(
+        sql,
+        id,
+        "achievement",
+        "Unlocked " +
+          ACHIEVEMENTS.find((a) => a.id === achievement)!.name +
+          ".",
+        undefined,
+        "achievement:" + achievement,
+      );
     await sql.query("UPDATE progression SET xp=xp+$1 WHERE user_id=$2", [
       xp,
       id,
@@ -123,7 +155,10 @@ export async function getProgress(sql: SQL, id: string): Promise<Progression> {
       [id, day],
     )
   ).rows[0].count;
+  const weekly = await weeklyProgress(sql, id);
   return {
+    weekly: weekly.goals,
+    week: weekly.week,
     xp,
     level: Math.floor(xp / 500) + 1,
     levelXp: xp % 500,
@@ -138,5 +173,29 @@ export async function getProgress(sql: SQL, id: string): Promise<Progression> {
     })),
     day,
     rewardedMatches: Math.min(5, count),
+  };
+}
+
+export async function weeklyProgress(sql: SQL, id: string) {
+  const week = weekAt();
+  const count = (
+    await sql.query<{ duels: number; wins: number; variety: number }>(
+      "SELECT count(*)::int AS duels,count(*) FILTER(WHERE m.winner_id=$1)::int AS wins,count(DISTINCT m.game)::int AS variety FROM matches m JOIN results r ON r.match_id=m.id WHERE r.user_id=$1 AND m.status='finished' AND m.reason='Score' AND m.ended_at >= $2::date AND m.ended_at < $2::date+interval '7 days'",
+      [id, week],
+    )
+  ).rows[0];
+  const claims = (
+    await sql.query<{ goal: string }>(
+      "SELECT goal FROM weekly_rewards WHERE user_id=$1 AND week=$2",
+      [id, week],
+    )
+  ).rows;
+  return {
+    week,
+    goals: WEEKLY_GOALS.map((g) => ({
+      ...g,
+      progress: Math.min(g.target, count[g.id]),
+      complete: claims.some((c) => c.goal === g.id),
+    })),
   };
 }

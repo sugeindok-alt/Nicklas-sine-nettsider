@@ -1,6 +1,10 @@
 "use client";
 import { Check, Lock, Trophy } from "lucide-react";
-import { ACHIEVEMENTS, type Progression as Progress } from "@/lib/progression";
+import {
+  ACHIEVEMENTS,
+  rarity,
+  type Progression as Progress,
+} from "@/lib/progression";
 export function ProgressionPanel({
   progress,
   compact = false,
@@ -65,6 +69,38 @@ export function ProgressionPanel({
           </div>
         ))}
       </div>
+      {progress.weekly && (
+        <>
+          <div className="daily-heading">
+            <h3>Weekly challenges</h3>
+            <span>Reset Monday · +150 XP each</span>
+          </div>
+          <div className="daily-grid">
+            {progress.weekly.map((g) => (
+              <div
+                key={g.id}
+                className={`daily-goal ${g.complete ? "complete" : ""}`}
+              >
+                <span>
+                  {g.complete ? (
+                    <Check size={18} />
+                  ) : (
+                    <span className="goal-dot" />
+                  )}
+                </span>
+                <div>
+                  <b>{g.name}</b>
+                  <p>{g.description}</p>
+                  <small>
+                    {g.progress}/{g.target} completed
+                  </small>
+                </div>
+                <small>{g.complete ? "DONE" : "+150"}</small>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       {!compact && (
         <>
           <div className="daily-heading">
@@ -86,6 +122,7 @@ export function ProgressionPanel({
                   {earned ? <Trophy size={20} /> : <Lock size={18} />}
                   <div>
                     <b>{a.name}</b>
+                    <span className="achievement-rarity">{rarity[a.id]}</span>
                     <p>{a.description}</p>
                     <small>
                       {earned

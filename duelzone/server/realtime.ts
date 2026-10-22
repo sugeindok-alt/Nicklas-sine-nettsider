@@ -16,6 +16,8 @@ import { FrontierMatch } from "./frontier-match";
 import { isFrontier } from "../lib/frontier";
 import { LiveMatch } from "./live-match";
 import { difficulties, type Difficulty } from "../lib/bot";
+import { compatibleGames } from "../lib/platform";
+import { Platform } from "./platform";
 import { Social } from "./social";
 import { lengthScale, type MatchRules } from "../lib/social";
 
@@ -47,6 +49,7 @@ export function realtime(
       mode: "ranked" | "casual";
       at: number;
       rating: number;
+      excluded: Game[];
     }
   >();
   const matches = new Map<string, Match>();
@@ -60,6 +63,8 @@ export function realtime(
   const tournamentPlayers = new Set<string>();
   const rematched = new Set<string>();
   let matching = false;
+  const platform = new Platform(db, sockets);
+  db.notificationChanged = (id) => platform.changed(id);
   const social = new Social(db, {
     sockets,
     active,
@@ -84,6 +89,30 @@ export function realtime(
       }
     },
   });
+  platform.attach({
+    available: (id) =>
+      sockets.has(id) &&
+      !active.has(id) &&
+      !pairing.has(id) &&
+      !tournamentPlayers.has(id) &&
+      !queue.has(id),
+    friend: (a, b, sql) => social.assertFriend(a, b, sql),
+    settings: (id, sql) => social.settings(id, sql),
+    start: async (ids, game, rules) => {
+      for (const id of ids) {
+        requireFree(id);
+        if (!sockets.has(id) || queue.has(id))
+          throw Error("A player is offline or busy.");
+      }
+      ids.forEach((id) => pairing.add(id));
+      try {
+        return await createMatch(ids, game, "friend", undefined, rules);
+      } finally {
+        ids.forEach((id) => pairing.delete(id));
+      }
+    },
+  });
+  social.relationshipChanged = (a, b) => platform.parties!.invalidate(a, b);
   const socialUpdate = (id: string) =>
     void social.presenceChanged(id).catch(() => {});
   const lobby = () =>
@@ -154,6 +183,7 @@ export function realtime(
         for (const id of ids) {
           active.delete(id);
           socialUpdate(id);
+          platform.changed(id);
         }
         lobby();
         io.emit("refresh");
@@ -174,6 +204,7 @@ export function realtime(
     for (const id of ids) {
       queue.delete(id);
       active.set(id, match.state.id);
+      void platform.parties?.disconnected(id).catch(() => {});
       void social.cancelFor(id).catch(() => {});
       for (const [code, i] of invites) if (i.host === id) invites.delete(code);
     }
@@ -253,21 +284,27 @@ export function realtime(
     try {
       for (const [id, a] of queue) {
         if (!sockets.has(id) || active.has(id) || pairing.has(id)) continue;
-        const candidate = [...queue].find(
+        const candidates = [...queue].filter(
           ([other, b]) =>
             other !== id &&
             !pairing.has(other) &&
             sockets.has(other) &&
-            (a.game === "any" || b.game === "any" || a.game === b.game) &&
+            compatibleGames(a.game, b.game, a.excluded, b.excluded).length >
+              0 &&
             a.mode === b.mode &&
             (a.mode === "casual" ||
               Math.abs(a.rating - b.rating) <=
                 150 +
                   Math.floor((Date.now() - Math.min(a.at, b.at)) / 1000) * 15),
         );
+        let candidate: (typeof candidates)[number] | undefined;
+        for (const c of candidates)
+          if (!(await social.blocked(id, c[0]))) {
+            candidate = c;
+            break;
+          }
         if (!candidate) continue;
         const other = candidate[0];
-        if (await social.blocked(id, other)) continue;
         if (
           queue.get(id) !== a ||
           queue.get(other) !== candidate[1] ||
@@ -282,12 +319,13 @@ export function realtime(
         pairing.add(id);
         pairing.add(other);
         try {
-          const game =
-            a.game === "any"
-              ? candidate[1].game === "any"
-                ? games[randomInt(games.length)]
-                : candidate[1].game
-              : a.game;
+          const compatible = compatibleGames(
+            a.game,
+            candidate[1].game,
+            a.excluded,
+            candidate[1].excluded,
+          );
+          const game = compatible[randomInt(compatible.length)];
           await createMatch([id, other], game, a.mode);
         } catch {
           for (const uid of [id, other]) {
@@ -391,6 +429,7 @@ export function realtime(
     if (previous) socket.emit("match", matches.get(previous)?.snapshot(p.id));
     lobby();
     socialUpdate(p.id);
+    void platform.parties?.disconnected(p.id).catch(() => {});
     let events = 0;
     let window = Date.now();
     let busy = false;
@@ -413,6 +452,8 @@ export function realtime(
       socket.on(name, async (data, ack) => {
         if (typeof ack !== "function") return;
         const readOnly = [
+          "platform:state",
+          "social:activity",
           "social:state",
           "social:search",
           "social:messages",
@@ -462,6 +503,7 @@ export function realtime(
       return {};
     });
     social.bind(socket, event);
+    platform.bind(socket, event);
     event("queue:join", async (data) => {
       const input = z
         .object({
@@ -482,7 +524,9 @@ export function realtime(
         if (i.host === p.id) invites.delete(code);
       if (!socket.connected || sockets.get(p.id) !== socket)
         throw new Error("Connection lost. Reconnect and try again.");
-      queue.set(p.id, { ...input, at: Date.now(), rating });
+      const excluded =
+        input.game === "any" ? (await platform.preferences(p.id)).excluded : [];
+      queue.set(p.id, { ...input, at: Date.now(), rating, excluded });
       lobby();
       await tryPair();
       return {};
@@ -646,6 +690,7 @@ export function realtime(
     socket.on("disconnect", () => {
       if (sockets.get(p.id) !== socket) return;
       sockets.delete(p.id);
+      void platform.parties?.disconnected(p.id).catch(() => {});
       void social.cancelFor(p.id).catch(() => {});
       queue.delete(p.id);
       for (const [code, i] of invites)

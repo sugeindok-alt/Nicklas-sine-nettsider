@@ -80,4 +80,54 @@ export type Progression = {
   daily: { id: string; name: string; description: string; complete: boolean }[];
   day: string;
   rewardedMatches: number;
+  weekly?: {
+    id: string;
+    name: string;
+    description: string;
+    progress: number;
+    target: number;
+    complete: boolean;
+    xp: number;
+  }[];
+  week?: string;
 };
+export const rarity: Record<string, string> = {
+  "first-win": "Common",
+  versatile: "Rare",
+  untouched: "Epic",
+  combo: "Rare",
+  territory: "Rare",
+  memory: "Epic",
+  "arena-win": "Rare",
+  "ten-wins": "Epic",
+};
+export function weekAt(date = new Date()) {
+  const d = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+export const WEEKLY_GOALS = [
+  {
+    id: "duels",
+    name: "A good week",
+    description: "Complete five scored duels.",
+    target: 5,
+    xp: 150,
+  },
+  {
+    id: "wins",
+    name: "Make your mark",
+    description: "Win three scored duels.",
+    target: 3,
+    xp: 150,
+  },
+  {
+    id: "variety",
+    name: "Broaden your game",
+    description: "Finish three different disciplines.",
+    target: 3,
+    xp: 150,
+  },
+] as const;

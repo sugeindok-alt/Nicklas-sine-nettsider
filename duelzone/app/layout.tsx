@@ -4,6 +4,7 @@ import "./competition.css";
 import "./experience.css";
 import "./social.css";
 import "./frontier.css";
+import "./platform.css";
 export const metadata: Metadata = {
   title: "DuelZone — Every millisecond matters.",
   description:

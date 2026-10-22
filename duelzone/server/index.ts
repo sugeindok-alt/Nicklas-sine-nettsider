@@ -16,6 +16,7 @@ import {
   type AuthRequest,
 } from "./auth";
 import { realtime } from "./realtime";
+import { imageData } from "./media";
 import { games } from "../lib/shared";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
@@ -82,7 +83,7 @@ app.use((_req, res, next) => {
 app.use(
   "/api",
   rateLimit(60000, 240),
-  express.json({ limit: "12kb" }),
+  express.json({ limit: "512kb" }),
   (req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     if (
@@ -213,6 +214,57 @@ app.get("/api/profile/:id", async (req, res) => {
   }
   res.json(profile);
 });
+app.get("/api/media/:id/:kind", async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id),
+    kind = z.enum(["avatar", "banner"]).parse(req.params.kind);
+  const row = (
+    await db.query<{ image: string }>(
+      `SELECT ${kind} AS image FROM users WHERE id=$1`,
+      [id],
+    )
+  ).rows[0];
+  if (!row?.image) {
+    res.status(404).end();
+    return;
+  }
+  const [header, data] = row.image.split(",");
+  res.setHeader("Content-Type", header.slice(5).split(";")[0]);
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.send(Buffer.from(data, "base64"));
+});
+app.post("/api/profile/media", auth, async (req: AuthRequest, res) => {
+  const input = z
+    .object({
+      avatar: imageData(80 * 1024).optional(),
+      banner: imageData(200 * 1024).optional(),
+      cosmetic: z.enum(["graphite", "carbon", "laurel"]),
+    })
+    .parse(req.body);
+  const profile = await db.profile(req.player!.id);
+  const peak = Math.max(
+    1000,
+    ...(profile!.seasons as { rating: number }[]).map((s) => s.rating),
+  );
+  if (
+    (input.cosmetic === "carbon" && profile!.progression.level < 3) ||
+    (input.cosmetic === "laurel" && peak < 1050)
+  ) {
+    res
+      .status(403)
+      .json({ error: "Earn this finish through progression first." });
+    return;
+  }
+  await db.query(
+    "UPDATE users SET avatar=COALESCE($1,avatar),banner=COALESCE($2,banner),cosmetic=$3,media_version=media_version+1 WHERE id=$4",
+    [
+      input.avatar ?? null,
+      input.banner ?? null,
+      input.cosmetic,
+      req.player!.id,
+    ],
+  );
+  res.json({ player: await db.player(req.player!.id) });
+});
 app.patch("/api/profile", auth, async (req: AuthRequest, res) => {
   const data = z
     .object({
@@ -315,6 +367,11 @@ app.post("/api/tournaments/:id/join", auth, async (req: AuthRequest, res) => {
       [id, req.player!.id],
     );
   });
+  await db.query(
+    "UPDATE tournament_invites SET status='accepted' WHERE tournament_id=$1 AND to_id=$2 AND status='pending'",
+    [id, req.player!.id],
+  );
+  db.notificationChanged?.(req.player!.id);
   live.io.emit("refresh");
   res.json({ ok: true });
 });

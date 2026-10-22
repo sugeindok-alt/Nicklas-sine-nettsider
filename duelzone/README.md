@@ -153,7 +153,7 @@ Use a **Free Render Web Service** and an independent **Neon Free PostgreSQL** da
 1. Connect only this repository through the Render GitHub app. Select the DuelZone release branch, root directory `duelzone`, Node runtime, Frankfurt and Free compute.
 2. Build with `npm ci --include=dev && npm run build`; start with `npm start`. Set `NODE_VERSION=24`, `HOST=0.0.0.0`, `PORT=10000`, `NODE_ENV=production`, `TRUST_PROXY_HOPS=1`, and the Neon `DATABASE_URL` with TLS certificate verification. Set the health-check path to `/api/health`.
 3. The app reads Render's `RENDER_EXTERNAL_URL` automatically. Frontend, HTTP API and WebSockets share this HTTPS origin; no separate browser backend URL is needed.
-4. Enable **After CI Checks Pass** for automatic deployment. CI exercises all nine games and persistence. Deployment/restarts interrupt unfinished games without applying ratings; completed accounts, match history and rewards remain in Neon. Deploy at quiet times. Run one instance only.
+4. Enable **After CI Checks Pass** for automatic deployment. CI exercises all 15 games, social features and persistence. Deployment/restarts interrupt unfinished games without applying ratings; completed accounts, match history and rewards remain in Neon. Deploy at quiet times. Run one instance only.
 5. Keep the same Render service to retain its `onrender.com` address across restarts and updates. Do not delete/recreate it. Free compute may sleep after 15 minutes of inactivity and take about a minute to wake. Free monthly compute, transfer and build limits still apply; this is not an always-on availability guarantee.
 6. For an existing custom domain, add it in Render **Settings → Custom Domains**, then enter the DNS records shown by Render at your domain provider. Add `https://your-domain.example` to `EXTRA_ORIGINS`, save/redeploy, and wait for Render's domain verification and HTTPS certificate. Keep the Render URL as the default origin. Domain registration itself may cost money and is not included.
 
@@ -165,7 +165,7 @@ The optional `render.yaml` at the repository root documents this service configu
 
 The Friends button is available throughout the signed-in app, including during matches. Search by username, accept or decline requests, message friends, view their profile and head-to-head record, and challenge them directly. Incoming requests, unread messages and the latest 50 challenge events are persisted in PostgreSQL; online/in-match presence and notifications use authenticated WebSockets.
 
-Direct challenges last 60 seconds, require both players to be online and free, and launch a private unranked match after acceptance. Choose any of the nine games or Random, with quick (two-thirds), standard or extended (one-and-a-half) length. The setting changes classic round counts or competitive stage durations and carries into rematches. Disconnects cancel pending invitations; server startup expires leftover invitations. Declined or cancelled requests cannot start a match.
+Direct challenges last 60 seconds, require both players to be online and free, and launch a private unranked match after acceptance. Choose any of the 15 games or Random, with quick (two-thirds), standard or extended (one-and-a-half) length. The setting changes classic round counts or competitive stage durations and carries into rematches. Disconnects cancel pending invitations; server startup expires leftover invitations. Declined or cancelled requests cannot start a match.
 
 Spectating is optional for Dodge Duel, Grid Rush and Aim Clash. Both players must enable spectators and visible presence in Privacy, and the challenge must allow spectators. A friend of either player can watch; blocking either player denies access. Spectators receive read-only match state, never enter the player roster, and cannot send gameplay actions. Privacy changes revoke active spectators. Rooms allow at most 20 spectators.
 
@@ -195,3 +195,29 @@ The live integration suite creates ten isolated QA accounts and completes all fi
 Experience tests cover prediction, reconciliation, two moving players with 60/140/220 ms simulated round-trip latency, jitter and 5% packet loss, all five bot modes at all four difficulties, automatic/random Quick Match, cancellation, reconnects, compact frames, a complete AI match and AI rematches without persistent rewards. These are automated independent clients, not evidence of a two-human playtest.
 
 Social integration tests use four isolated clients on port 3104 to cover search, duplicate/self/forged requests, friendship, decline, messaging privacy, idempotency, unread/read state, offline delivery, presence, direct challenges, duplicate acceptance, custom duration, rematches, head-to-head records, spectator permissions, blocking, disconnect cancellation and persistence after restart. Production QA must use temporary accounts in private matches only and remove only its own recorded test data afterwards.
+
+## Platform dashboard and parties
+
+Signed-in players land on a personal dashboard with real results, rank, progression, friends, invitations and open tournaments. The game library groups all 15 disciplines, provides interactive warm-ups, search, favorites, recently played filters and personal records. Quick Match exclusions are persisted per account. Random matchmaking uses the intersection of both players' allowed games; no compatible opponent means staying in the queue. AI is always an explicit practice choice.
+
+Notifications for requests, direct challenges, parties, tournament invitations, achievements, weekly rewards and promotions persist with individual read states. Friends can display online, away, offline or the discipline they are playing, subject to presence privacy. Away status follows inactivity or a hidden page. Existing authentication is unchanged; email verification remains disabled as requested.
+
+Profiles support avatars and banners stored in PostgreSQL, favorite disciplines, cosmetic frames, seasonal ratings, rank history recorded from new ranked results and head-to-head rivalries. Uploaded images are resized by the client and validated by signature and size on the server (PNG/JPEG/WebP only, 80 KiB avatar and 200 KiB banner). No external upload service is required. Weekly goals reset Monday at 00:00 UTC and award 150 XP each once. Cosmetic frames unlock at level 3 or Silver; they never affect gameplay.
+
+Parties have two seats because the existing games are 1v1. An online host invites a friend, selects a discipline and match length, and launches only after both players are ready. Changing rules, reconnecting or entering a match clears readiness. Party membership persists across restarts. Invitations expire after 90 seconds; duplicates, full rooms, non-host edits and unavailable players are rejected. Removing or blocking a friend closes their shared party. Party matches reuse the existing private match engine and rematch flow. Tournament participants can invite friends to open four-player brackets; accepting an invitation registers the recipient with capacity and friendship checks.
+
+### Private report review
+
+Players can report a friend or a received message from the Friends panel. Reports are stored privately in `player_reports`; there is no automatic moderation or promised response time. Blocking is available immediately. Only the site owner with database credentials can inspect reports. In a private terminal with the existing production `DATABASE_URL` set, run:
+
+```sh
+npm run reports -- list
+npm run reports -- show <report-id>
+npm run reports -- resolve <report-id>
+```
+
+`list` returns open report IDs, categories and dates. `show` includes the submitted details and the referenced message; handle that output as private. `resolve` only marks the report reviewed and does not ban or alter an account. The command never initializes the game server or changes active matches. Reports are limited to five per day per sender, with duplicate open reports rejected.
+
+### Focused platform verification
+
+`npm run test:platform` covers all four phases using isolated accounts and a temporary database: durable notifications and authorization, compatible Quick Match pools, image validation and favorites, party readiness and private launch, reconnects, tournament registration, reports and block cleanup. `platform.test.ts` covers UTC weekly resets, idempotent rewards, promotion notifications and image validation. These fixtures do not seed the public service. Browser QA uses separate Chrome and in-app sessions for friendship, notifications, party acceptance, readiness and a complete shared match.

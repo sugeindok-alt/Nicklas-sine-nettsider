@@ -67,7 +67,11 @@ function Avatar({ player }: { player: Player }) {
       className="avatar"
       style={{ color: player.accent, background: `${player.accent}15` }}
     >
-      {player.username.slice(0, 2).toUpperCase()}
+      {player.avatar ? (
+        <img src={player.avatar} alt="" />
+      ) : (
+        player.username.slice(0, 2).toUpperCase()
+      )}
     </span>
   );
 }
@@ -76,12 +80,16 @@ function Presence({ friend }: { friend: Friend }) {
     <span className={`friend-presence ${friend.presence}`}>
       <i />
       {friend.presence === "in-match"
-        ? "In a match"
+        ? friend.game
+          ? `Playing ${GAME_INFO[friend.game].name}`
+          : "In a match"
         : friend.presence === "hidden"
           ? "Status private"
           : friend.presence === "online"
             ? "Online"
-            : "Offline"}
+            : friend.presence === "away"
+              ? "Away"
+              : "Offline"}
     </span>
   );
 }
@@ -99,6 +107,7 @@ export function SocialPanel({
   command,
   onProfile,
   matchId,
+  onState,
 }: {
   user: Player;
   socket: Socket | null;
@@ -106,6 +115,7 @@ export function SocialPanel({
   command: Command;
   onProfile: (id: string) => void;
   matchId?: string;
+  onState?: (state: SocialState | null) => void;
 }) {
   const [open, setOpen] = useState(false),
     [tab, setTab] = useState("friends"),
@@ -117,6 +127,11 @@ export function SocialPanel({
   const [selected, setSelected] = useState<string | null>(null),
     [messages, setMessages] = useState<Message[]>([]),
     [body, setBody] = useState("");
+  const [report, setReport] = useState<{
+      target: string;
+      messageId?: string;
+    } | null>(null),
+    [reportReceipt, setReportReceipt] = useState("");
   const [profile, setProfile] = useState<FriendProfile | null>(null),
     [rivalry, setRivalry] = useState<Rivalry | null>(null),
     [loadingThread, setLoadingThread] = useState(false),
@@ -137,6 +152,22 @@ export function SocialPanel({
     messageEnd = useRef<HTMLDivElement>(null);
   selectedRef.current = selected;
   openRef.current = open;
+  useEffect(() => {
+    onState?.(social);
+  }, [social, onState]);
+  useEffect(() => {
+    const openSocial = (event: Event) => {
+      const d = (event as CustomEvent).detail || {};
+      setOpen(true);
+      setTab(d.tab || "friends");
+      setQuery(d.query || "");
+      setResults(null);
+      setSelected(d.target || null);
+      setChallengeTarget(null);
+    };
+    window.addEventListener("dz:friends", openSocial);
+    return () => window.removeEventListener("dz:friends", openSocial);
+  }, []);
   const refresh = useCallback(async () => {
     if (!connected) return;
     try {
@@ -761,6 +792,70 @@ export function SocialPanel({
                         </span>
                       </div>
                     )}
+                    {report?.target === friend.id && (
+                      <form
+                        className="report-form form-stack"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const form = new FormData(e.currentTarget);
+                          void act(
+                            "social:report",
+                            {
+                              ...report,
+                              reason: form.get("reason"),
+                              details: form.get("details"),
+                            },
+                            (r) => {
+                              setReport(null);
+                              setReportReceipt(r.reportId);
+                            },
+                          );
+                        }}
+                      >
+                        <h4>Report a concern</h4>
+                        <label>
+                          Reason
+                          <select name="reason">
+                            <option value="harassment">Harassment</option>
+                            <option value="spam">Spam</option>
+                            <option value="cheating">Cheating</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </label>
+                        <label>
+                          What happened?
+                          <textarea
+                            name="details"
+                            minLength={5}
+                            maxLength={500}
+                            required
+                            rows={3}
+                          />
+                        </label>
+                        <p className="small muted">
+                          The report is stored privately for the site owner.
+                          Reporting does not block this player; use Block player
+                          below to stop contact.
+                        </p>
+                        <div className="social-inline">
+                          <button className="button secondary" disabled={busy}>
+                            Submit report
+                          </button>
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() => setReport(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                    {reportReceipt && (
+                      <p className="report-receipt" role="status">
+                        Report saved. Reference {reportReceipt.slice(0, 8)}.
+                      </p>
+                    )}
                     <div className="message-heading">
                       <MessageCircle size={16} />
                       <h4>Private conversation</h4>
@@ -807,6 +902,21 @@ export function SocialPanel({
                             className={`private-message ${m.from_id === user.id ? "outgoing" : ""}`}
                           >
                             <p>{m.body}</p>
+                            {m.from_id !== user.id && (
+                              <button
+                                className="message-report"
+                                aria-label={`Report message from ${friend.username}`}
+                                onClick={() => {
+                                  setReport({
+                                    target: friend.id,
+                                    messageId: m.id,
+                                  });
+                                  setReportReceipt("");
+                                }}
+                              >
+                                Report
+                              </button>
+                            )}
                             <time dateTime={m.created_at}>
                               {date(m.created_at)}
                             </time>
@@ -862,6 +972,15 @@ export function SocialPanel({
                       DuelZone. {body.length}/1000
                     </p>
                     <div className="social-manage">
+                      <button
+                        className="text-button muted"
+                        onClick={() => {
+                          setReport({ target: friend.id });
+                          setReportReceipt("");
+                        }}
+                      >
+                        Report player
+                      </button>
                       <button
                         className="text-button muted"
                         disabled={busy || !connected}

@@ -51,6 +51,7 @@ type Runtime = {
 type Event = (name: string, fn: (data: unknown) => Promise<unknown>) => void;
 
 export class Social {
+  relationshipChanged?: (a: string, b: string) => Promise<void>;
   private watching = new Map<string, string>();
   private sweepBusy = false;
   constructor(
@@ -77,7 +78,7 @@ export class Social {
     ).rows[0];
     return { ...defaultPrivacy, ...row?.settings };
   }
-  private async friend(a: string, b: string, sql: SQL = this.db) {
+  async assertFriend(a: string, b: string, sql: SQL = this.db) {
     if (a === b || (await this.blocked(a, b, sql)))
       throw Error("This player is unavailable.");
     const row = (
@@ -120,7 +121,13 @@ export class Social {
     for (const id of new Set(ids))
       this.runtime.sockets.get(id)?.emit("social:changed");
   }
-  private notice(id: string, text: string, kind: string, target?: string) {
+  private async notice(
+    id: string,
+    text: string,
+    kind: string,
+    target?: string,
+  ) {
+    await this.db.notify(id, kind, text, target);
     this.runtime.sockets.get(id)?.emit("social:notice", { text, kind, target });
   }
   private async presence(id: string, settings?: Privacy) {
@@ -133,7 +140,13 @@ export class Social {
           ? "offline"
           : match
             ? "in-match"
-            : "online",
+            : this.runtime.sockets.get(id)?.data.away
+              ? "away"
+              : "online",
+      game:
+        prefs.presence && this.runtime.sockets.has(id) && match
+          ? match.state.game
+          : null,
       watchable: !!(
         prefs.presence &&
         prefs.spectators &&
@@ -166,7 +179,7 @@ export class Social {
           privacy: Privacy | null;
         }
       >(
-        "SELECT u.id,u.username,u.accent,u.bio,f.requester,f.status,f.created_at,s.settings AS privacy FROM friendships f JOIN users u ON u.id=CASE WHEN f.a=$1 THEN f.b ELSE f.a END LEFT JOIN social_settings s ON s.user_id=u.id WHERE f.a=$1 OR f.b=$1 ORDER BY u.username_key",
+        "SELECT u.id,u.username,u.accent,u.bio,CASE WHEN u.avatar<>'' THEN '/api/media/'||u.id||'/avatar?v='||u.media_version ELSE '' END AS avatar,f.requester,f.status,f.created_at,s.settings AS privacy FROM friendships f JOIN users u ON u.id=CASE WHEN f.a=$1 THEN f.b ELSE f.a END LEFT JOIN social_settings s ON s.user_id=u.id WHERE f.a=$1 OR f.b=$1 ORDER BY u.username_key",
         [id],
       )
     ).rows;
@@ -193,7 +206,7 @@ export class Social {
     ).rows;
     const blocked = (
       await this.db.query(
-        "SELECT u.id,u.username,u.accent,u.bio FROM social_blocks b JOIN users u ON u.id=b.target_id WHERE owner_id=$1 ORDER BY u.username_key",
+        "SELECT u.id,u.username,u.accent,u.bio,CASE WHEN u.avatar<>'' THEN '/api/media/'||u.id||'/avatar?v='||u.media_version ELSE '' END AS avatar FROM social_blocks b JOIN users u ON u.id=b.target_id WHERE owner_id=$1 ORDER BY u.username_key",
         [id],
       )
     ).rows;
@@ -263,6 +276,14 @@ export class Social {
   bind(socket: Socket, event: Event) {
     const me = socket.data.player as Player,
       id = me.id;
+    event("social:activity", async (data) => {
+      const { away } = z.object({ away: z.boolean() }).parse(data);
+      if (socket.data.away !== away) {
+        socket.data.away = away;
+        await this.presenceChanged(id);
+      }
+      return {};
+    });
     event("social:state", async () => ({ social: await this.state(id) }));
     event("social:search", async (data) => {
       const { query } = z
@@ -277,7 +298,7 @@ export class Social {
         .parse(data);
       const rows = (
         await this.db.query(
-          "SELECT u.id,u.username,u.accent,u.bio FROM users u WHERE u.id<>$1 AND strpos(u.username_key,$2)>0 AND NOT EXISTS(SELECT 1 FROM social_blocks b WHERE (b.owner_id=$1 AND b.target_id=u.id) OR (b.owner_id=u.id AND b.target_id=$1)) ORDER BY CASE WHEN u.username_key=$2 THEN 0 ELSE 1 END,u.username_key LIMIT 20",
+          "SELECT u.id,u.username,u.accent,u.bio,CASE WHEN u.avatar<>'' THEN '/api/media/'||u.id||'/avatar?v='||u.media_version ELSE '' END AS avatar FROM users u WHERE u.id<>$1 AND strpos(u.username_key,$2)>0 AND NOT EXISTS(SELECT 1 FROM social_blocks b WHERE (b.owner_id=$1 AND b.target_id=u.id) OR (b.owner_id=u.id AND b.target_id=$1)) ORDER BY CASE WHEN u.username_key=$2 THEN 0 ELSE 1 END,u.username_key LIMIT 20",
           [id, query.toLowerCase()],
         )
       ).rows;
@@ -318,7 +339,7 @@ export class Social {
         );
       });
       this.changed(id, target);
-      this.notice(
+      await this.notice(
         target,
         `${me.username} sent you a friend request.`,
         "request",
@@ -357,7 +378,7 @@ export class Social {
       });
       this.changed(id, target);
       if (accept)
-        this.notice(
+        await this.notice(
           target,
           `${me.username} accepted your friend request.`,
           "friend",
@@ -377,6 +398,7 @@ export class Social {
           [id, target],
         );
       });
+      await this.relationshipChanged?.(id, target);
       this.stopWatching([id, target]);
       this.changed(id, target);
       return {};
@@ -405,6 +427,7 @@ export class Social {
             [id, target],
           );
       });
+      await this.relationshipChanged?.(id, target);
       this.stopWatching([id, target]);
       this.changed(id, target);
       return {};
@@ -428,7 +451,7 @@ export class Social {
       const { target, before } = targetSchema
         .extend({ before: z.string().datetime().optional() })
         .parse(data);
-      await this.friend(id, target);
+      await this.assertFriend(id, target);
       const rows = (
         await this.db.query(
           "SELECT * FROM private_messages WHERE ((from_id=$1 AND to_id=$2) OR (from_id=$2 AND to_id=$1)) AND created_at < $3::timestamptz ORDER BY created_at DESC,id DESC LIMIT 50",
@@ -446,7 +469,7 @@ export class Social {
         .parse(data);
       let inserted = false;
       const message = await this.locked(id, target, async (sql) => {
-        await this.friend(id, target, sql);
+        await this.assertFriend(id, target, sql);
         if (!(await this.settings(target, sql)).messages)
           throw Error("This friend has paused private messages.");
         const old = (
@@ -478,7 +501,7 @@ export class Social {
     });
     event("social:read", async (data) => {
       const { target } = targetSchema.parse(data);
-      await this.friend(id, target);
+      await this.assertFriend(id, target);
       await this.db.query(
         "UPDATE private_messages SET read_at=now() WHERE from_id=$1 AND to_id=$2 AND read_at IS NULL",
         [target, id],
@@ -488,7 +511,7 @@ export class Social {
     });
     event("social:profile", async (data) => {
       const { target } = targetSchema.parse(data);
-      await this.friend(id, target);
+      await this.assertFriend(id, target);
       const rivalry = (
         await this.db.query(
           "SELECT count(*)::int AS played,count(*) FILTER(WHERE m.winner_id=$1)::int AS wins,count(*) FILTER(WHERE m.winner_id=$2)::int AS losses,count(*) FILTER(WHERE m.winner_id IS NULL)::int AS draws FROM matches m JOIN results a ON a.match_id=m.id AND a.user_id=$1 JOIN results b ON b.match_id=m.id AND b.user_id=$2 WHERE m.status='finished'",
@@ -507,7 +530,7 @@ export class Social {
       const game =
         input.game === "any" ? games[randomInt(games.length)] : input.game;
       await this.locked(id, input.target, async (sql) => {
-        await this.friend(id, input.target, sql);
+        await this.assertFriend(id, input.target, sql);
         if (
           !this.runtime.available(id) ||
           !this.runtime.available(input.target)
@@ -545,7 +568,7 @@ export class Social {
         );
       });
       this.changed(id, input.target);
-      this.notice(
+      await this.notice(
         input.target,
         `${me.username} challenged you to a duel.`,
         "challenge",
@@ -565,7 +588,7 @@ export class Social {
       ).rows[0];
       if (!c) throw Error("Invitation unavailable.");
       await this.locked(id, c.from_id, async (sql) => {
-        await this.friend(id, c.from_id, sql);
+        await this.assertFriend(id, c.from_id, sql);
         const rows = (
           await sql.query(
             "UPDATE social_challenges SET status=$1 WHERE id=$2 AND status='pending' AND expires_at>now() RETURNING id",
@@ -609,7 +632,7 @@ export class Social {
           throw error;
         }
       } else
-        this.notice(
+        await this.notice(
           c.from_id,
           `${me.username} declined your challenge.`,
           "challenge",
@@ -634,7 +657,7 @@ export class Social {
     });
     event("social:watch", async (data) => {
       const { target } = targetSchema.parse(data);
-      await this.friend(id, target);
+      await this.assertFriend(id, target);
       if (!this.runtime.available(id))
         throw Error("Leave your match or queue before watching.");
       const match = this.runtime.matches.get(

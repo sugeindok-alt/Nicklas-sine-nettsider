@@ -57,9 +57,25 @@ import { AIPicker } from "./ai-picker";
 import { AnimatedNumber } from "./animated-number";
 import type { Difficulty } from "@/lib/bot";
 import Arena, { Practice } from "./arena";
+import {
+  PlayerAvatar,
+  ProfileExtras,
+  ProfileMediaEditor,
+} from "./profile-extras";
+import {
+  PartyPanel,
+  TournamentInvitations,
+  TournamentInviteButton,
+} from "./party-panel";
+import { GameLibrary } from "./game-library";
+import { Dashboard } from "./dashboard";
+import { defaultPreferences } from "@/lib/platform";
+import { NotificationCenter, usePlatform } from "./platform-center";
+import type { SocialState } from "@/lib/social";
 import { SocialPanel } from "./social-panel";
 
 type View =
+  | "dashboard"
   | "arena"
   | "leaderboard"
   | "tournaments"
@@ -78,7 +94,23 @@ type Overview = {
   season: { id: string; name: string; end: string };
 };
 type BoardRow = Player & { rating: number; games: number; wins: number };
-type Profile = {
+export type Profile = {
+  favorites?: Game[];
+  rankHistory?: { rating: number; season_id: string; created_at: string }[];
+  seasons?: {
+    season_id: string;
+    rating: number;
+    games: number;
+    wins: number;
+  }[];
+  rivals?: {
+    id: string;
+    username: string;
+    accent: string;
+    played: number;
+    wins: number;
+    losses: number;
+  }[];
   progression: Progression;
   player: Player;
   rating: { rating: number; games: number; wins: number };
@@ -99,7 +131,7 @@ type Profile = {
     rating_change: number;
   }[];
 };
-type Tournament = {
+export type Tournament = {
   id: string;
   name: string;
   game: Game;
@@ -117,6 +149,7 @@ type Tournament = {
   }[];
 };
 const nav = [
+  { id: "dashboard", label: "Home", icon: Activity },
   { id: "arena", label: "The arena", icon: Gamepad2 },
   { id: "leaderboard", label: "Leaderboard", icon: Trophy },
   { id: "tournaments", label: "Tournaments", icon: Swords },
@@ -183,6 +216,7 @@ export default function DuelZone() {
       const next = location.hash.slice(1);
       if (
         [
+          "dashboard",
           "arena",
           "leaderboard",
           "tournaments",
@@ -195,7 +229,13 @@ export default function DuelZone() {
     }
     read();
     window.addEventListener("hashchange", read);
-    const invite = new URLSearchParams(location.search).get("invite");
+    const parameters = new URLSearchParams(location.search);
+    const sharedPlayer = parameters.get("player");
+    if (sharedPlayer && /^[a-f0-9-]{36}$/.test(sharedPlayer)) {
+      setProfileId(sharedPlayer);
+      setView("profile");
+    }
+    const invite = parameters.get("invite");
     if (invite) {
       setPending({ invite });
       history.replaceState(null, "", location.pathname + location.hash);
@@ -203,6 +243,7 @@ export default function DuelZone() {
     api("/me")
       .then((data) => {
         setUser(data.player);
+        if (data.player && !location.hash) setView("dashboard");
         if (invite && !data.player) setAuth("login");
       })
       .catch((e) => notify(e.message))
@@ -340,6 +381,8 @@ export default function DuelZone() {
       }),
     [],
   );
+  const platform = usePlatform(user?.id, socket.current, connected, command);
+  const [social, setSocial] = useState<SocialState | null>(null);
   const begin = useCallback(
     async (action: Pending) => {
       setBusy(true);
@@ -454,6 +497,7 @@ export default function DuelZone() {
     : 100;
   const GameIcon = gameIcons[game];
   const pageTitle = {
+    dashboard: "Your dashboard",
     arena: "The arena",
     leaderboard: "Leaderboard",
     tournaments: "Tournaments",
@@ -608,19 +652,21 @@ export default function DuelZone() {
           <div className="workspace-label">THE COMPETITIVE PLAYGROUND</div>
           <div className="nav-group-label">PLAY & COMPETE</div>
           <nav aria-label="Main navigation">
-            {nav.map((item) => (
-              <a
-                key={item.id}
-                href={`#${item.id}`}
-                className={`nav-item ${view === item.id ? "active" : ""}`}
-                onClick={() => navigate(item.id)}
-                aria-current={view === item.id ? "page" : undefined}
-              >
-                <item.icon size={18} />
-                <span>{item.label}</span>
-                {view === item.id && <i />}
-              </a>
-            ))}
+            {nav
+              .filter((item) => user || item.id !== "dashboard")
+              .map((item) => (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  className={`nav-item ${view === item.id ? "active" : ""}`}
+                  onClick={() => navigate(item.id)}
+                  aria-current={view === item.id ? "page" : undefined}
+                >
+                  <item.icon size={18} />
+                  <span>{item.label}</span>
+                  {view === item.id && <i />}
+                </a>
+              ))}
           </nav>
           <div className="sidebar-season">
             <div className="season-icon">
@@ -690,6 +736,24 @@ export default function DuelZone() {
                 <i className="status-dot" />
                 {serverUp ? overview.online.toLocaleString() : "—"} online
               </span>
+              {user && (
+                <PartyPanel
+                  user={user}
+                  state={platform.state}
+                  social={social}
+                  command={command}
+                  connected={connected}
+                  matchId={match?.phase !== "finished" ? match?.id : undefined}
+                />
+              )}
+              {user && (
+                <NotificationCenter
+                  state={platform.state}
+                  command={command}
+                  onNavigate={navigate}
+                  error={platform.error}
+                />
+              )}
               <span className="topbar-divider" />
               {user ? (
                 <button
@@ -703,7 +767,11 @@ export default function DuelZone() {
                       background: `${user.accent}18`,
                     }}
                   >
-                    {user.username.slice(0, 2).toUpperCase()}
+                    {user.avatar ? (
+                      <img src={user.avatar} alt="" />
+                    ) : (
+                      user.username.slice(0, 2).toUpperCase()
+                    )}
                   </span>
                   <span>
                     {user.username}
@@ -742,6 +810,26 @@ export default function DuelZone() {
                 exit={{ opacity: 0, y: -5 }}
                 transition={{ duration: 0.22 }}
               >
+                {view === "dashboard" &&
+                  (ownProfile ? (
+                    <Dashboard
+                      profile={ownProfile}
+                      social={social}
+                      tournaments={tournaments}
+                      preferences={
+                        platform.state?.preferences || defaultPreferences
+                      }
+                      play={(g) => play(g, "casual")}
+                      practice={setPractice}
+                      navigate={navigate}
+                      command={command}
+                      notify={notify}
+                    />
+                  ) : user ? (
+                    <Loading />
+                  ) : (
+                    gate()
+                  ))}
                 {view === "arena" && (
                   <>
                     <div className="page-intro">
@@ -786,7 +874,13 @@ export default function DuelZone() {
                           </button>
                           <button
                             className="button ghost"
-                            onClick={() => play(game, "friend")}
+                            onClick={() =>
+                              user
+                                ? window.dispatchEvent(
+                                    new CustomEvent("dz:friends"),
+                                  )
+                                : setAuth("login")
+                            }
                           >
                             <Users size={17} />
                             Challenge a friend
@@ -882,93 +976,22 @@ export default function DuelZone() {
                         </button>
                       </div>
                     </section>
-                    <section className="game-section">
-                      <div className="section-heading">
-                        <div>
-                          <p className="eyebrow">FIND YOUR NEXT OBSESSION</p>
-                          <h2>
-                            Choose your battleground
-                            <span className="count-badge">{games.length}</span>
-                          </h2>
-                        </div>
-                        <button
-                          className="text-button muted"
-                          onClick={() => setHelp(true)}
-                        >
-                          Learn the rules
-                          <ArrowUpRight size={15} />
-                        </button>
-                      </div>
-                      <div className="game-grid">
-                        {[
-                          ...frontierGames,
-                          ...featuredGames,
-                          ...games.filter(
-                            (g) => !isCompetition(g) && !isFrontier(g),
-                          ),
-                        ].map((g, i) => {
-                          const Icon = gameIcons[g];
-                          return (
-                            <article
-                              key={g}
-                              className={`game-card ${game === g ? "selected" : ""}`}
-                              style={
-                                {
-                                  "--game-color": GAME_INFO[g].color,
-                                } as React.CSSProperties
-                              }
-                            >
-                              <button
-                                className="game-preview"
-                                onClick={() => setPractice(g)}
-                                aria-label={`Practice ${GAME_INFO[g].name}`}
-                              >
-                                <GameArt game={g} />
-                                <span className="preview-label">
-                                  Try a warm-up
-                                  <ArrowUpRight size={14} />
-                                </span>
-                                <span className="game-number">
-                                  {String(i + 1).padStart(2, "0")}
-                                </span>
-                              </button>
-                              <div className="game-card-info">
-                                <div className="game-meta">
-                                  <Icon size={14} />
-                                  <span>
-                                    {isFrontier(g)
-                                      ? "ACTION & TACTICS"
-                                      : isCompetition(g)
-                                        ? "SKILL DISCIPLINE"
-                                        : "CLASSIC DUEL"}
-                                  </span>
-                                  <span>1V1</span>
-                                </div>
-                                <h3>{GAME_INFO[g].name}</h3>
-                                <p>{GAME_INFO[g].tag.toLowerCase()}</p>
-                                <button
-                                  className="game-select"
-                                  onClick={() => setGame(g)}
-                                  aria-pressed={game === g}
-                                >
-                                  {game === g ? (
-                                    <>
-                                      <Check size={14} />
-                                      Selected
-                                    </>
-                                  ) : (
-                                    <>
-                                      Select game
-                                      <ArrowRight size={15} />
-                                    </>
-                                  )}
-                                </button>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </section>
+                    <GameLibrary
+                      ready={!!platform.state}
+                      selected={game}
+                      onSelect={setGame}
+                      onPractice={setPractice}
+                      preferences={
+                        platform.state?.preferences || defaultPreferences
+                      }
+                      save={async (prefs) => {
+                        await command("preferences:save", prefs);
+                        await platform.refresh();
+                        setTick((t) => t + 1);
+                      }}
+                      onLogin={() => setAuth("login")}
+                      profile={ownProfile}
+                    />
                     <div className="play-strip">
                       <div className="selected-game-icon">
                         <GameIcon size={22} />
@@ -1206,6 +1229,11 @@ export default function DuelZone() {
                         </button>
                       }
                     />
+                    <TournamentInvitations
+                      state={platform.state}
+                      command={command}
+                      notify={notify}
+                    />
                     <div className="tournament-explainer">
                       <span>
                         01 <b>Gather your four</b>
@@ -1279,6 +1307,16 @@ export default function DuelZone() {
                                 {t.winner} takes the title
                               </div>
                             )}
+                            {t.status === "open" &&
+                              t.entrants.length < 4 &&
+                              t.entrants.some((p) => p.id === user?.id) && (
+                                <TournamentInviteButton
+                                  tournament={t}
+                                  social={social}
+                                  command={command}
+                                  notify={notify}
+                                />
+                              )}
                             {t.status === "open" && (
                               <div className="tournament-actions">
                                 {t.entrants.some((p) => p.id === user?.id) ? (
@@ -1364,16 +1402,25 @@ export default function DuelZone() {
                       <Loading />
                     ) : (
                       <>
-                        <div className="profile-hero">
-                          <span
-                            className="avatar profile-avatar"
-                            style={{
-                              color: profile.player.accent,
-                              background: `${profile.player.accent}15`,
-                            }}
-                          >
-                            {profile.player.username.slice(0, 2).toUpperCase()}
+                        <div
+                          className={`profile-banner cosmetic-${profile.player.cosmetic || "graphite"}`}
+                          style={
+                            profile.player.banner
+                              ? {
+                                  backgroundImage: `url("${profile.player.banner}")`,
+                                }
+                              : undefined
+                          }
+                        >
+                          <span>
+                            DUELZONE / {profile.progression.title.toUpperCase()}
                           </span>
+                        </div>
+                        <div className="profile-hero">
+                          <PlayerAvatar
+                            player={profile.player}
+                            className="profile-avatar"
+                          />
                           <div>
                             <span className="eyebrow">DUELZONE PLAYER</span>
                             <h1>{profile.player.username}</h1>
@@ -1396,6 +1443,24 @@ export default function DuelZone() {
                             </button>
                           )}
                         </div>
+                        <ProfileExtras
+                          onConnect={() =>
+                            user
+                              ? window.dispatchEvent(
+                                  new CustomEvent("dz:friends", {
+                                    detail: {
+                                      target: profile.player.id,
+                                      query: profile.player.username,
+                                    },
+                                  }),
+                                )
+                              : setAuth("login")
+                          }
+                          profile={profile}
+                          own={profile.player.id === user?.id}
+                          onProfile={showProfile}
+                          notify={notify}
+                        />
                         {profile.progression && (
                           <ProgressionPanel progress={profile.progression} />
                         )}
@@ -1410,7 +1475,13 @@ export default function DuelZone() {
                               label: "WIN RATE",
                               value: `${profile.stats.played ? Math.round((profile.stats.wins / profile.stats.played) * 100) : 0}%`,
                             },
-                            { label: "DRAWS", value: profile.stats.draws },
+                            {
+                              label: "LOSSES",
+                              value:
+                                profile.stats.played -
+                                profile.stats.wins -
+                                profile.stats.draws,
+                            },
                           ].map((s) => (
                             <div className="stat-card" key={s.label}>
                               <span className="eyebrow">{s.label}</span>
@@ -1438,7 +1509,12 @@ export default function DuelZone() {
                                 />
                                 <h3>{GAME_INFO[g].name}</h3>
                                 <strong>
-                                  {record ? record.best.toLocaleString() : "—"}
+                                  {record
+                                    ? (g === "showdown"
+                                        ? record.best / 2
+                                        : record.best
+                                      ).toLocaleString()
+                                    : "—"}
                                 </strong>
                                 <span>PERSONAL BEST</span>
                                 <p>
@@ -1481,22 +1557,33 @@ export default function DuelZone() {
                     {!user ? (
                       gate()
                     ) : (
-                      <SettingsForm
-                        user={user}
-                        onSave={(p) => {
-                          setUser(p);
-                          notify("Profile updated.");
-                        }}
-                        onPassword={() => {
-                          setTick((t) => t + 1);
-                          socket.current?.connect();
-                          notify(
-                            "Password updated. Other sessions have been signed out.",
-                          );
-                        }}
-                        onLogout={() => void logout()}
-                        notify={notify}
-                      />
+                      <>
+                        <ProfileMediaEditor
+                          user={user}
+                          profile={ownProfile}
+                          onSave={(p) => {
+                            setUser(p);
+                            setTick((t) => t + 1);
+                          }}
+                          notify={notify}
+                        />
+                        <SettingsForm
+                          user={user}
+                          onSave={(p) => {
+                            setUser(p);
+                            notify("Profile updated.");
+                          }}
+                          onPassword={() => {
+                            setTick((t) => t + 1);
+                            socket.current?.connect();
+                            notify(
+                              "Password updated. Other sessions have been signed out.",
+                            );
+                          }}
+                          onLogout={() => void logout()}
+                          notify={notify}
+                        />
+                      </>
                     )}
                   </>
                 )}
@@ -1517,6 +1604,7 @@ export default function DuelZone() {
               onSwitch={() => setAuth(auth === "login" ? "register" : "login")}
               onSuccess={(p) => {
                 setUser(p);
+                if (!pendingRef.current) navigate("dashboard");
                 setAuth(null);
                 setTick((t) => t + 1);
               }}
@@ -1535,8 +1623,8 @@ export default function DuelZone() {
         {help && (
           <Modal title="Find your edge." wide onClose={() => setHelp(false)}>
             <p className="modal-description">
-              Nine disciplines. Find a real rival, invite a friend, or practise
-              against a clearly labelled AI opponent.
+              Fifteen disciplines. Find a real rival, invite a friend, or
+              practise against a clearly labelled AI opponent.
             </p>
             <div className="rules-list">
               {games.map((g) => {
@@ -1750,6 +1838,7 @@ export default function DuelZone() {
             connected={connected}
             command={command}
             onProfile={showProfile}
+            onState={setSocial}
             matchId={match?.phase !== "finished" ? match?.id : undefined}
           />
         )}

@@ -128,6 +128,9 @@ export function rankFor(rating: number) {
   return [...RANKS].reverse().find((r) => rating >= r.min)!;
 }
 export type Player = {
+  avatar?: string;
+  banner?: string;
+  cosmetic?: string;
   id: string;
   username: string;
   accent: string;

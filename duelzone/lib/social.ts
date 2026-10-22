@@ -32,9 +32,10 @@ export const defaultPrivacy: Privacy = {
   presence: true,
   spectators: false,
 };
-export type Presence = "online" | "offline" | "in-match" | "hidden";
+export type Presence = "online" | "away" | "offline" | "in-match" | "hidden";
 export type Friend = Player & {
   presence: Presence;
+  game?: Game | null;
   watchable: boolean;
   unread: number;
 };

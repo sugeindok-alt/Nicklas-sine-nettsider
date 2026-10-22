@@ -30,3 +30,4 @@ jobs:
       - run: npm run test:experience
       - run: npm run test:social
       - run: npm run test:frontier
+      - run: npm run test:platform
