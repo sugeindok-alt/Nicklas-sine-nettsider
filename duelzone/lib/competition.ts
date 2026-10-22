@@ -100,6 +100,7 @@ export class Competition {
     readonly ids: string[],
     now: number,
     private random = Math.random,
+    private durationScale = 1,
   ) {
     this.schedule =
       game === "arena"
@@ -154,7 +155,8 @@ export class Competition {
           ? 60000
           : v.discipline === "mind"
             ? 54000
-            : 45000);
+            : 45000) *
+        this.durationScale;
     v.points = Object.fromEntries(this.ids.map((id) => [id, 0]));
     this.base = { ...v.points };
     v.players = Object.fromEntries(

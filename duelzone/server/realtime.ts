@@ -14,6 +14,8 @@ import { Database } from "./db";
 import { Match } from "./game";
 import { LiveMatch } from "./live-match";
 import { difficulties, type Difficulty } from "../lib/bot";
+import { Social } from "./social";
+import { lengthScale, type MatchRules } from "../lib/social";
 
 const gameSchema = z.enum(games);
 export function realtime(
@@ -49,6 +51,32 @@ export function realtime(
   const tournamentPlayers = new Set<string>();
   const rematched = new Set<string>();
   let matching = false;
+  const social = new Social(db, {
+    sockets,
+    active,
+    matches,
+    available: (id) =>
+      sockets.has(id) &&
+      !active.has(id) &&
+      !pairing.has(id) &&
+      !tournamentPlayers.has(id) &&
+      !queue.has(id),
+    start: async (ids, game, rules) => {
+      for (const id of ids) {
+        requireFree(id);
+        if (!sockets.has(id) || queue.has(id))
+          throw new Error("A player is offline or busy.");
+      }
+      ids.forEach((id) => pairing.add(id));
+      try {
+        return await createMatch(ids, game, "friend", undefined, rules);
+      } finally {
+        ids.forEach((id) => pairing.delete(id));
+      }
+    },
+  });
+  const socialUpdate = (id: string) =>
+    void social.presenceChanged(id).catch(() => {});
   const lobby = () =>
     io.emit("lobby", {
       online: sockets.size,
@@ -72,6 +100,7 @@ export function realtime(
     game: Game,
     mode: Mode,
     onComplete?: (m: Match) => Promise<void>,
+    rules?: MatchRules,
   ) {
     const people = await Promise.all(ids.map((id) => db.player(id)));
     if (people.some((p) => !p)) throw new Error("Player unavailable");
@@ -82,6 +111,7 @@ export function realtime(
       game,
       mode,
       (state) => {
+        social.broadcast(state);
         const phase = `${state.phase}:${state.challenge?.id}`;
         const frame =
           state.phase === "active" && state.competition && lastPhase === phase;
@@ -102,18 +132,30 @@ export function realtime(
       },
       (s) => db.finishMatch(s),
       async (m) => {
-        for (const id of ids) active.delete(id);
+        for (const id of ids) {
+          active.delete(id);
+          socialUpdate(id);
+        }
         lobby();
         io.emit("refresh");
         await onComplete?.(m);
         setTimeout(() => matches.delete(m.state.id), 600000).unref();
       },
     );
+    if (rules) {
+      match.state.rules = rules;
+      if (!isCompetition(game))
+        match.state.rounds = Math.max(
+          3,
+          Math.round(match.state.rounds * lengthScale[rules.length]),
+        );
+    }
     await db.beginMatch(match.state);
     matches.set(match.state.id, match);
     for (const id of ids) {
       queue.delete(id);
       active.set(id, match.state.id);
+      void social.cancelFor(id).catch(() => {});
       for (const [code, i] of invites) if (i.host === id) invites.delete(code);
     }
     match.start();
@@ -163,6 +205,7 @@ export function realtime(
         async () => ({}),
         async (m) => {
           active.delete(id);
+          socialUpdate(id);
           lobby();
           setTimeout(() => matches.delete(m.state.id), 600000).unref();
         },
@@ -173,6 +216,7 @@ export function realtime(
         if (invite.host === id) invites.delete(code);
       matches.set(match.state.id, match);
       active.set(id, match.state.id);
+      void social.cancelFor(id).catch(() => {});
       match.start();
       lobby();
     } finally {
@@ -199,6 +243,18 @@ export function realtime(
         );
         if (!candidate) continue;
         const other = candidate[0];
+        if (await social.blocked(id, other)) continue;
+        if (
+          queue.get(id) !== a ||
+          queue.get(other) !== candidate[1] ||
+          !sockets.has(id) ||
+          !sockets.has(other) ||
+          active.has(id) ||
+          active.has(other) ||
+          pairing.has(id) ||
+          pairing.has(other)
+        )
+          continue;
         pairing.add(id);
         pairing.add(other);
         try {
@@ -310,6 +366,7 @@ export function realtime(
     const previous = active.get(p.id);
     if (previous) socket.emit("match", matches.get(previous)?.snapshot());
     lobby();
+    socialUpdate(p.id);
     let events = 0;
     let window = Date.now();
     let busy = false;
@@ -331,11 +388,18 @@ export function realtime(
     function event(name: string, fn: (data: unknown) => Promise<unknown>) {
       socket.on(name, async (data, ack) => {
         if (typeof ack !== "function") return;
-        if (busy) {
+        const readOnly = [
+          "social:state",
+          "social:search",
+          "social:messages",
+          "social:profile",
+          "social:read",
+        ].includes(name);
+        if (busy && !readOnly) {
           ack({ error: "Please wait for the previous action." });
           return;
         }
-        busy = true;
+        if (!readOnly) busy = true;
         try {
           const authenticated = await sessionPlayer(
             db,
@@ -358,7 +422,7 @@ export function realtime(
                   : "Something went wrong.",
           });
         } finally {
-          busy = false;
+          if (!readOnly) busy = false;
         }
       });
     }
@@ -373,6 +437,7 @@ export function realtime(
       await createAI(p.id, game, difficulty);
       return {};
     });
+    social.bind(socket, event);
     event("queue:join", async (data) => {
       const input = z
         .object({
@@ -426,6 +491,8 @@ export function realtime(
       if (invite.host === p.id)
         throw new Error("Send this invite to a friend.");
       requireFree(invite.host);
+      if (await social.blocked(p.id, invite.host))
+        throw new Error("This invite is unavailable.");
       pairing.add(p.id);
       pairing.add(invite.host);
       try {
@@ -481,6 +548,8 @@ export function realtime(
         setTimeout(() => rematched.delete(id), 600000).unref();
         return {};
       }
+      if (await social.blocked(m.state.players[0].id, m.state.players[1].id))
+        throw new Error("Rematch unavailable.");
       if (!m.state.rematch.includes(p.id)) m.state.rematch.push(p.id);
       for (const u of m.state.players)
         sockets.get(u.id)?.emit("match", m.snapshot());
@@ -492,7 +561,13 @@ export function realtime(
         }
         ids.forEach((id) => pairing.add(id));
         try {
-          await createMatch(ids, m.state.game, m.state.mode);
+          await createMatch(
+            ids,
+            m.state.game,
+            m.state.mode,
+            undefined,
+            m.state.rules,
+          );
           rematched.add(id);
           setTimeout(() => rematched.delete(id), 600000).unref();
         } finally {
@@ -542,6 +617,7 @@ export function realtime(
     socket.on("disconnect", () => {
       if (sockets.get(p.id) !== socket) return;
       sockets.delete(p.id);
+      void social.cancelFor(p.id).catch(() => {});
       queue.delete(p.id);
       for (const [code, i] of invites)
         if (i.host === p.id) invites.delete(code);
@@ -552,6 +628,7 @@ export function realtime(
   });
   const tick = setInterval(() => {
     void tryPair();
+    void social.sweep().catch(() => {});
     for (const [c, i] of invites) if (i.expires < Date.now()) invites.delete(c);
   }, 2000);
   tick.unref();

@@ -138,6 +138,18 @@ The database schema is additive. Migration should happen while the old server is
 
 The optional `render.yaml` at the repository root documents this service configuration. Do not apply it as a second service when one already exists.
 
+## Friends and social play
+
+The Friends button is available throughout the signed-in app, including during matches. Search by username, accept or decline requests, message friends, view their profile and head-to-head record, and challenge them directly. Incoming requests, unread messages and the latest 50 challenge events are persisted in PostgreSQL; online/in-match presence and notifications use authenticated WebSockets.
+
+Direct challenges last 60 seconds, require both players to be online and free, and launch a private unranked match after acceptance. Choose any of the nine games or Random, with quick (two-thirds), standard or extended (one-and-a-half) length. The setting changes classic round counts or competitive stage durations and carries into rematches. Disconnects cancel pending invitations; server startup expires leftover invitations. Declined or cancelled requests cannot start a match.
+
+Spectating is optional for Dodge Duel, Grid Rush and Aim Clash. Both players must enable spectators and visible presence in Privacy, and the challenge must allow spectators. A friend of either player can watch; blocking either player denies access. Spectators receive read-only match state, never enter the player roster, and cannot send gameplay actions. Privacy changes revoke active spectators. Rooms allow at most 20 spectators.
+
+Blocking removes friendships, cancels direct invitations and prevents private messages, friend requests, challenges, invite-link matches, rematches, search discovery and spectating between the pair. Privacy switches control requests, messages, challenges, presence and spectators. Messages are stored as plain text, limited to 1,000 characters, and rendered as text. They are private within the application, not end-to-end encrypted. Message IDs make retries idempotent. Friendship pairs and pending challenges have database uniqueness constraints; writes lock both player rows in a consistent order. Persistent limits allow 15 friend requests per hour, 30 messages per minute and 10 challenges per minute, with a 10-second pair cooldown. Each list is limited to 200 accepted or pending relationships.
+
+The additive social migration creates separate tables and adds a `rules` JSONB column to matches. It does not rewrite accounts, password hashes, previous results or ratings. No email verification or additional service credentials are required. Keep the existing Render service, Neon database and single-instance deployment.
+
 ## Verification
 
 ```sh
@@ -148,6 +160,7 @@ npm run test:production
 npm run test:integration
 npm run test:live
 npm run test:experience
+npm run test:social
 ```
 
 Unit tests cover password hashing, session parsing, Elo, season boundaries, each game's scoring, false starts, duplicate/spectator/stale inputs and atomic persistent settlement. The integration suite starts its own API server on port 3101 and creates twelve explicitly named QA accounts in a unique, ignored `test-results/` database. It exercises all four games concurrently using separate authenticated sockets, mode separation, real invites, rematches, reconnects, a complete tournament, persistence across restart, origin rejection and logout. These test players never seed the normal application.
@@ -157,3 +170,5 @@ CI runs these checks on changes to this app. Browser warm-ups, desktop/mobile la
 The live integration suite creates ten isolated QA accounts and completes all five new modes through authenticated WebSockets, checking consistent results, a friend invite, reconnection, mutual rematches, reward integrity and persistence after restart. These test clients are never used as production opponents.
 
 Experience tests cover prediction, reconciliation, two moving players with 60/140/220 ms simulated round-trip latency, jitter and 5% packet loss, all five bot modes at all four difficulties, automatic/random Quick Match, cancellation, reconnects, compact frames, a complete AI match and AI rematches without persistent rewards. These are automated independent clients, not evidence of a two-human playtest.
+
+Social integration tests use four isolated clients on port 3104 to cover search, duplicate/self/forged requests, friendship, decline, messaging privacy, idempotency, unread/read state, offline delivery, presence, direct challenges, duplicate acceptance, custom duration, rematches, head-to-head records, spectator permissions, blocking, disconnect cancellation and persistence after restart. Production QA must use temporary accounts in private matches only and remove only its own recorded test data afterwards.

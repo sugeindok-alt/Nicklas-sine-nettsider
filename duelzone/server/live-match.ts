@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { Competition } from "../lib/competition";
 import { Match, type Action } from "./game";
 import { BotDriver, type Difficulty } from "../lib/bot";
+import { lengthScale } from "../lib/social";
 
 export class LiveMatch extends Match {
   private engine?: Competition;
@@ -23,6 +24,7 @@ export class LiveMatch extends Match {
         this.state.players.map((p) => p.id),
         Date.now(),
         () => randomInt(0, 1000000) / 1000000,
+        lengthScale[this.state.rules?.length || "standard"],
       );
       this.state.challenge = { id: randomUUID() };
       this.state.phase = "active";

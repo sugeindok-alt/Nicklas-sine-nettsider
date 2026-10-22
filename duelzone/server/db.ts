@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { elo, seasonAt, type Player, type MatchState } from "../lib/shared";
 import { awardProgress, getProgress } from "./progression";
+import { socialSchema } from "./social";
 
 export interface SQL {
   query<T = Record<string, unknown>>(
@@ -81,6 +82,8 @@ export class Database implements SQL {
     `;
     for (const statement of schema.split(";").filter((s) => s.trim()))
       await this.query(statement);
+    for (const statement of socialSchema.split(";").filter((s) => s.trim()))
+      await this.query(statement);
     await this.currentSeason();
     await this.query(
       "UPDATE matches SET status='abandoned',reason='Server restarted; no rating change',ended_at=now() WHERE status='active'",
@@ -110,8 +113,14 @@ export class Database implements SQL {
     const season = await this.currentSeason();
     await this.transaction(async (tx) => {
       await tx.query(
-        "INSERT INTO matches(id,game,mode,season_id) VALUES($1,$2,$3,$4)",
-        [state.id, state.game, state.mode, season.id],
+        "INSERT INTO matches(id,game,mode,season_id,rules) VALUES($1,$2,$3,$4,$5)",
+        [
+          state.id,
+          state.game,
+          state.mode,
+          season.id,
+          JSON.stringify(state.rules || {}),
+        ],
       );
       for (const p of state.players)
         await tx.query("INSERT INTO results(match_id,user_id) VALUES($1,$2)", [

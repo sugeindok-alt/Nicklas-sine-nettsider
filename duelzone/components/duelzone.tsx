@@ -56,6 +56,7 @@ import { AIPicker } from "./ai-picker";
 import { AnimatedNumber } from "./animated-number";
 import type { Difficulty } from "@/lib/bot";
 import Arena, { Practice } from "./arena";
+import { SocialPanel } from "./social-panel";
 
 type View =
   | "arena"
@@ -1699,6 +1700,16 @@ export default function DuelZone() {
               }}
             />
           </Modal>
+        )}
+        {user && (
+          <SocialPanel
+            user={user}
+            socket={socket.current}
+            connected={connected}
+            command={command}
+            onProfile={showProfile}
+            matchId={match?.phase !== "finished" ? match?.id : undefined}
+          />
         )}
         <AnimatePresence>
           {toast && (

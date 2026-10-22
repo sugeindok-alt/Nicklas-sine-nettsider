@@ -71,6 +71,7 @@ export function Playfield({
   submitRef.current = submit;
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (document.querySelector(".social-panel")) return;
       if (event.repeat || event.target instanceof HTMLInputElement) return;
       if (
         (state.game === "reaction" || state.game === "precision") &&

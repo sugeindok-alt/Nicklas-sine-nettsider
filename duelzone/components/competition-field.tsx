@@ -34,11 +34,13 @@ export function CompetitionField({
   userId,
   onAction,
   practice = false,
+  readOnly = false,
 }: {
   state: MatchState;
   userId: string;
   onAction: (action: Action) => void;
   practice?: boolean;
+  readOnly?: boolean;
 }) {
   const view = state.competition!,
     player = view.players[userId];
@@ -69,6 +71,7 @@ export function CompetitionField({
   const now =
     received.current.server + Math.max(0, clock - received.current.local);
   const send = (action: Partial<Action>, gesture = true) => {
+    if (readOnly) return;
     const current = latest.current;
     if (!current.state.challenge || current.state.phase !== "active") return;
     if (gesture) unlockSound();
@@ -94,6 +97,7 @@ export function CompetitionField({
   sendRef.current = send;
   useEffect(() => {
     const keydown = (e: KeyboardEvent) => {
+      if (readOnly || document.querySelector(".social-panel")) return;
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
@@ -135,6 +139,13 @@ export function CompetitionField({
     document.addEventListener("keyup", keyup);
     window.addEventListener("blur", reset);
     inputTick.current = () => {
+      if (readOnly) return;
+      if (document.querySelector(".social-panel")) {
+        pressed.current.clear();
+        pointer.current = null;
+        sendRef.current({ dx: 0, dy: 0 }, false);
+        return;
+      }
       const v = latest.current.state.competition,
         p = v?.players[userId];
       if (!v || !p || v.discipline !== "dodge") return;
@@ -161,7 +172,7 @@ export function CompetitionField({
       document.removeEventListener("keyup", keyup);
       window.removeEventListener("blur", reset);
     };
-  }, [userId]);
+  }, [userId, readOnly]);
   useEffect(() => {
     if (view.stage !== previous.current.stage) {
       tone("stage");
@@ -190,15 +201,19 @@ export function CompetitionField({
   const remaining = Math.max(0, view.stageEnds - now),
     puzzle = view.puzzle;
   return (
-    <div className={`competition-field discipline-${view.discipline}`}>
+    <div
+      className={`competition-field discipline-${view.discipline} ${readOnly ? "spectator-field" : ""}`}
+    >
       <div className="competition-top">
         <span>
           <i className="status-dot" />
-          {practice
-            ? "SOLO TRAINING"
-            : state.mode === "ai"
-              ? "AI PRACTICE · BOT"
-              : "LIVE 1V1"}
+          {readOnly
+            ? "SPECTATING"
+            : practice
+              ? "SOLO TRAINING"
+              : state.mode === "ai"
+                ? "AI PRACTICE · BOT"
+                : "LIVE 1V1"}
         </span>
         <b>{labels[view.discipline]}</b>
         <span className={remaining < 5000 ? "urgent" : ""}>
@@ -388,66 +403,68 @@ export function CompetitionField({
           </div>
         )}
       </div>
-      <div className="competition-controls">
-        {view.discipline === "dodge" ? (
-          <div className="direction-pad">
-            {[
-              ["a", ArrowLeft],
-              ["w", ArrowUp],
-              ["s", ArrowDown],
-              ["d", ArrowRight],
-            ].map(([key, Icon]) => {
-              const Symbol = Icon as typeof ArrowLeft;
-              return (
-                <button
-                  key={String(key)}
-                  aria-label={`Move ${{ a: "left", w: "up", s: "down", d: "right" }[key as string]}`}
-                  onPointerDown={(e) => {
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    pressed.current.add(String(key));
-                    unlockSound();
-                  }}
-                  onPointerUp={() => pressed.current.delete(String(key))}
-                  onPointerCancel={() => pressed.current.delete(String(key))}
-                >
-                  <Symbol size={19} />
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <span className="small muted">
-            {view.discipline === "grid"
-              ? "Adjacent tiles only · ⚡ +60 / second"
-              : view.discipline === "clash"
-                ? "Gold = double points · × = decoy"
-                : "Mistakes reset your streak"}
-          </span>
-        )}
-        {view.discipline !== "mind" && (
-          <button
-            className="button ability-button"
-            disabled={!abilityReady || view.transitionUntil > now}
-            onClick={() => send({ ability: true })}
-          >
-            {view.discipline === "dodge" ? (
-              <Zap size={16} />
-            ) : view.discipline === "grid" ? (
-              <Shield size={16} />
-            ) : (
-              <Crosshair size={16} />
-            )}
-            {now < player.readyAt
-              ? `${Math.ceil((player.readyAt - now) / 1000)}s`
-              : view.discipline === "dodge"
-                ? "Dash"
-                : view.discipline === "grid"
-                  ? "Fortify · 3"
-                  : "Focus · 3"}
-            <kbd>SPACE</kbd>
-          </button>
-        )}
-      </div>
+      {!readOnly && (
+        <div className="competition-controls">
+          {view.discipline === "dodge" ? (
+            <div className="direction-pad">
+              {[
+                ["a", ArrowLeft],
+                ["w", ArrowUp],
+                ["s", ArrowDown],
+                ["d", ArrowRight],
+              ].map(([key, Icon]) => {
+                const Symbol = Icon as typeof ArrowLeft;
+                return (
+                  <button
+                    key={String(key)}
+                    aria-label={`Move ${{ a: "left", w: "up", s: "down", d: "right" }[key as string]}`}
+                    onPointerDown={(e) => {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      pressed.current.add(String(key));
+                      unlockSound();
+                    }}
+                    onPointerUp={() => pressed.current.delete(String(key))}
+                    onPointerCancel={() => pressed.current.delete(String(key))}
+                  >
+                    <Symbol size={19} />
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="small muted">
+              {view.discipline === "grid"
+                ? "Adjacent tiles only · ⚡ +60 / second"
+                : view.discipline === "clash"
+                  ? "Gold = double points · × = decoy"
+                  : "Mistakes reset your streak"}
+            </span>
+          )}
+          {view.discipline !== "mind" && (
+            <button
+              className="button ability-button"
+              disabled={!abilityReady || view.transitionUntil > now}
+              onClick={() => send({ ability: true })}
+            >
+              {view.discipline === "dodge" ? (
+                <Zap size={16} />
+              ) : view.discipline === "grid" ? (
+                <Shield size={16} />
+              ) : (
+                <Crosshair size={16} />
+              )}
+              {now < player.readyAt
+                ? `${Math.ceil((player.readyAt - now) / 1000)}s`
+                : view.discipline === "dodge"
+                  ? "Dash"
+                  : view.discipline === "grid"
+                    ? "Fortify · 3"
+                    : "Focus · 3"}
+              <kbd>SPACE</kbd>
+            </button>
+          )}
+        </div>
+      )}
       <div className="competition-notice" aria-live="polite">
         {view.notice}
       </div>

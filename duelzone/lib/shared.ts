@@ -143,6 +143,7 @@ export type Challenge = {
   period?: number;
 };
 export type MatchState = {
+  rules?: import("./social").MatchRules;
   id: string;
   game: Game;
   mode: Mode;
