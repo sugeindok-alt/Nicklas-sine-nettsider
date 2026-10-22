@@ -44,6 +44,7 @@ const clients: {
   bytes: number;
   baseline: number;
   positions: number[];
+  finishedAt?: number;
 }[] = [];
 async function request(path: string, body?: unknown, cookie?: string) {
   const r = await fetch(origin + "/api" + path, {
@@ -86,6 +87,7 @@ async function create(i: number) {
   socket.on("match", (s: MatchState) => {
     c.state = s;
     c.full++;
+    if (s.phase === "finished") c.finishedAt = Date.now();
   });
   socket.on("frame", (f: MatchFrame) => {
     if (c.state?.id !== f.id) return;
@@ -159,6 +161,11 @@ try {
   );
   let seq = 0;
   const start = Date.now();
+  for (const c of clients) {
+    c.frames = c.full = c.bytes = c.baseline = 0;
+    c.positions = [];
+    c.finishedAt = undefined;
+  }
   const delayed = new Set<ReturnType<typeof setTimeout>>();
   const input = setInterval(() => {
     for (const [i, c] of clients.entries()) {
@@ -184,7 +191,13 @@ try {
   clearInterval(input);
   delayed.forEach(clearTimeout);
   for (const c of clients) {
-    assert(c.frames >= 65, `${c.frames} frames`);
+    const activeMs = Math.min(8500, (c.finishedAt ?? Date.now()) - start),
+      expectedFrames = Math.floor((activeMs / 100) * 0.75);
+    assert(activeMs >= 2000, "movement must be observed for at least two seconds");
+    assert(
+      c.frames >= expectedFrames,
+      `${c.frames} frames during ${activeMs}ms; expected at least ${expectedFrames}`,
+    );
     assert(c.full < 8, `${c.full} full messages`);
     assert(
       Math.max(...c.positions) - Math.min(...c.positions) > 0.12,
