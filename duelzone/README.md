@@ -1,6 +1,29 @@
 # DuelZone
 
-A competitive 1v1 web application with nine server-scored games, real WebSocket matchmaking, private friend invites, Elo seasons, player profiles, history, achievements, daily challenges and four-player knockout tournaments. No seeded players, simulated matchmaking, or generated standings.
+A competitive 1v1 web application with fifteen game modes, real WebSocket matchmaking, private friend challenges, Elo seasons, player profiles, history, achievements, daily challenges and four-player knockout tournaments. No seeded players, simulated matchmaking, or generated standings.
+
+## Gameplay expansion: phase one
+
+The five priority physics games and **DuelZone Showdown** extend the existing nine games. All use the existing accounts, friends, private challenges, queues, ranked settlement and rematches. The deployment remains https://duelzone-nicklas.onrender.com on the same free Render service and Neon database.
+
+| Mode | Rules | Controls |
+| --- | --- | --- |
+| Knockout Arena | Shrinking platform; charged shoves, directional blocks and dash collisions. First to three ring-outs or the lead at 90 seconds. | WASD/arrows, Space dash, hold/release J shove, K block |
+| Momentum Ball | A shared physical ball, bank shots, braking and charged kicks. First to five goals or the lead at 90 seconds. | WASD/arrows, Space dash, hold/release J shoot, K brake |
+| Grapple Rush | A long suspension course with gaps, overhead anchors, momentum, checkpoints and a tracking camera. First to finish; furthest progress breaks a timed match. | A/D, W jump, hold J grapple/release to swing free, Space boost |
+| Shadow Hunt | Equal hunter/runner time budgets across two legs. Collect three caches and extract, or scan and catch the runner. Hidden runner coordinates are stripped server-side from the hunter's packets. | WASD/arrows, Space dash, J scan, K sneak |
+| Core Control | Hold an uncontested rotating objective, displace rivals with pulses, use cover and block. Highest occupation score wins. | WASD/arrows, Space dash, hold/release J pulse, K block |
+| Showdown | Five distinct priority modes in a random order, short rounds and automatic transitions. First to three round points wins; a drawn round gives each player half a point. After five rounds the higher total wins. | Controls change with the discipline |
+
+Mouse aiming and held mouse attacks are supported, alongside touch movement/action buttons. AI practice is available in all six priority modes at four difficulties; bots submit ordinary controls and respect hidden information. Practice does not change rankings or XP. Spectators can watch Knockout, Momentum, Grapple and Core with the existing mutual opt-in. Shadow and Showdown are excluded to protect hidden information.
+
+The physics simulation runs at 30 Hz with 60 Hz substeps and swept movement against walls; snapshots run at 15 Hz. Canvas renders independently at display refresh rate. Acknowledged inputs support local prediction/reconciliation, opponents interpolate buffered states, and obsolete inputs expire. Static map geometry is sent on reliable round changes rather than every frame. Inputs, collision results, goals, objectives and wins are server-authoritative. Existing 20-second reconnect grace applies.
+
+An additive `matches.details` JSONB column stores round scores and statistics. Showdown's half-points are stored as integer units (two units per win) and presented as round points in the scoreboard/history. No existing accounts, passwords or results are rewritten.
+
+Focused validation: `node --import tsx --test tests/frontier.test.ts` checks the new mechanics and visibility boundary; `npm run test:frontier` runs complete games with twelve authenticated clients, simultaneous movement, 35–95 ms delayed inputs, jitter and dropped samples, plus friend-to-Showdown, persistence, reconnect, rematch and AI integration. These are controlled clients, not a two-human playtest.
+
+The remaining seventeen requested modes are subsequent phases and are not presented as playable: Blade Dash, Ricochet, Gravity Duel, Wallrun Tag, Floor Collapse, Drift Battle, Drone Hunt, Orb Heist, Trap Masters, Territory Wars, Portal Duel, Mini Heist, Rift Race, Tower Rush, Freeze Fight, Laser Lab, and Build & Battle. Their release should follow the same working-game-first approach; no placeholder buttons are added.
 
 This is a separate application in `duelzone/`. The repository's existing SocialAtlas application remains at the root.
 
@@ -16,9 +39,9 @@ npm run dev
 
 Open **http://localhost:3000**. Register two different accounts in two browser profiles, or one regular and one private window. Choose the same game and match type, then **Find a match** in both windows. Alternatively, **Challenge a friend**, copy the invite and open it in the other signed-in window. A single account cannot be its own opponent; connecting the same account twice transfers its live connection to the latest tab.
 
-**Quick Match** immediately searches the casual queue across all nine modes. Two Quick Match players get a randomly selected game; a player queued for a specific mode is also compatible. Cancel stops the search, and a lost connection cancels the queue. A real opponent automatically opens the VS introduction and match. One player alone stays in the queue until another joins.
+**Quick Match** immediately searches the casual queue across all available modes. Two Quick Match players get a randomly selected game; a player queued for a specific mode is also compatible. Cancel stops the search, and a lost connection cancels the queue. A real opponent automatically opens the VS introduction and match. One player alone stays in the queue until another joins.
 
-**Play vs AI** offers Dodge Duel, Grid Rush, Aim Clash, Mind Battle and Speed Arena at Easy, Medium, Hard and Expert. Bots read the same visible game state and submit ordinary movements, captures, shots and answers. Difficulty changes reaction time, aim error, memory accuracy and hazard anticipation. Bots are clearly labelled, never appear as online humans, and create no accounts, persistent match history, XP or ranked results. AI rematches start immediately. Solo warm-ups remain available.
+**Play vs AI** offers the five skill disciplines plus the six priority expansion modes at Easy, Medium, Hard and Expert. Bots read the same visible game state and submit ordinary movements, captures, shots and answers. Difficulty changes reaction time, aim error, memory accuracy and hazard anticipation. Bots are clearly labelled, never appear as online humans, and create no accounts, persistent match history, XP or ranked results. AI rematches start immediately. Solo warm-ups remain available.
 
 Local data persists in `.data/postgres/` using PGlite, an embedded PostgreSQL engine. It is not browser storage or a mock database. Restarting preserves accounts, sessions, completed matches, statistics and brackets. Setting `DATABASE_URL` switches to standard PostgreSQL using the same SQL schema. Do not point multiple processes at the embedded data directory.
 

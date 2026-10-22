@@ -84,6 +84,9 @@ export class Database implements SQL {
       await this.query(statement);
     for (const statement of socialSchema.split(";").filter((s) => s.trim()))
       await this.query(statement);
+    await this.query(
+      "ALTER TABLE matches ADD COLUMN IF NOT EXISTS details JSONB",
+    );
     await this.currentSeason();
     await this.query(
       "UPDATE matches SET status='abandoned',reason='Server restarted; no rating change',ended_at=now() WHERE status='active'",
@@ -172,8 +175,13 @@ export class Database implements SQL {
           );
       }
       await tx.query(
-        "UPDATE matches SET status='finished',winner_id=$1,reason=$2,ended_at=now() WHERE id=$3",
-        [state.winner, state.reason || "Score", state.id],
+        "UPDATE matches SET status='finished',winner_id=$1,reason=$2,ended_at=now(),details=$4 WHERE id=$3",
+        [
+          state.winner,
+          state.reason || "Score",
+          state.id,
+          state.frontier ? JSON.stringify(state.frontier.history) : null,
+        ],
       );
       for (const p of state.players)
         await tx.query(
@@ -196,7 +204,7 @@ export class Database implements SQL {
     ).rows[0] || { rating: 1000, games: 0, wins: 0 };
     const history = (
       await this.query(
-        `SELECT m.id,m.game,m.mode,m.status,m.winner_id,m.reason,m.ended_at,r.score,r.rating_change,u.username AS opponent,u.id AS opponent_id,other.score AS opponent_score FROM results r JOIN matches m ON m.id=r.match_id JOIN results other ON other.match_id=m.id AND other.user_id<>r.user_id JOIN users u ON u.id=other.user_id WHERE r.user_id=$1 AND m.status<>'active' ORDER BY m.ended_at DESC LIMIT 50`,
+        `SELECT m.id,m.game,m.mode,m.status,m.winner_id,m.reason,m.ended_at,m.details,r.score,r.rating_change,u.username AS opponent,u.id AS opponent_id,other.score AS opponent_score FROM results r JOIN matches m ON m.id=r.match_id JOIN results other ON other.match_id=m.id AND other.user_id<>r.user_id JOIN users u ON u.id=other.user_id WHERE r.user_id=$1 AND m.status<>'active' ORDER BY m.ended_at DESC LIMIT 50`,
         [id],
       )
     ).rows;

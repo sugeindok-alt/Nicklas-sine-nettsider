@@ -17,7 +17,8 @@
     "test:experience": "tsx tests/experience-integration.ts",
     "test:social": "tsx tests/social-integration.ts",
     "test:production": "node tests/production-smoke.mjs",
-    "format": "prettier --write app components lib server tests"
+    "format": "prettier --write app components lib server tests",
+    "test:frontier": "tsx tests/frontier-integration.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",

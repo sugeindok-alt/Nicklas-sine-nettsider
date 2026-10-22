@@ -46,6 +46,7 @@ import {
   type MatchState,
   type Player,
 } from "@/lib/shared";
+import { frontierGames, isFrontier } from "@/lib/frontier";
 import { matchFeed, network } from "@/lib/match-feed";
 import { api } from "@/lib/client";
 import GameArt, { gameIcons } from "./game-art";
@@ -94,6 +95,7 @@ type Profile = {
     score: number;
     opponent: string;
     opponent_score: number;
+    details?: import("@/lib/frontier").RoundRecord[];
     rating_change: number;
   }[];
 };
@@ -142,7 +144,7 @@ export default function DuelZone() {
   const [profile, setProfile] = useState<Profile | null>(null),
     [ownProfile, setOwnProfile] = useState<Profile | null>(null),
     [profileId, setProfileId] = useState<string | null>(null);
-  const [game, setGame] = useState<Game>("dodge"),
+  const [game, setGame] = useState<Game>("knockout"),
     [mode, setMode] = useState<"ranked" | "casual">("ranked"),
     [practice, setPractice] = useState<Game | null>(null);
   const [auth, setAuth] = useState<"login" | "register" | null>(null),
@@ -841,7 +843,7 @@ export default function DuelZone() {
                           <ArrowUpRight size={16} />
                         </div>
                         <span className="visual-index">
-                          FIVE NEW DISCIPLINES
+                          PHYSICS. TACTICS. COMPETITION.
                         </span>
                       </button>
                     </section>
@@ -851,13 +853,42 @@ export default function DuelZone() {
                         compact
                       />
                     )}
+                    <section className="showdown-feature">
+                      <div>
+                        <span className="eyebrow">
+                          THE COMPLETE COMPETITOR / NEW
+                        </span>
+                        <h2>DuelZone Showdown.</h2>
+                        <p>
+                          One rival. Five disciplines. A new draw every series.
+                          Win three rounds across combat, movement, sport and
+                          tactics to take the match.
+                        </p>
+                      </div>
+                      <div>
+                        <button
+                          className="button primary"
+                          disabled={busy}
+                          onClick={() => play("showdown", mode)}
+                        >
+                          <Swords size={17} /> Enter Showdown{" "}
+                          <ArrowUpRight size={17} />
+                        </button>
+                        <button
+                          className="text-button"
+                          onClick={() => setPractice("showdown")}
+                        >
+                          Learn the series <ArrowRight size={16} />
+                        </button>
+                      </div>
+                    </section>
                     <section className="game-section">
                       <div className="section-heading">
                         <div>
-                          <p className="eyebrow">NINE WAYS TO FIND YOUR EDGE</p>
+                          <p className="eyebrow">FIND YOUR NEXT OBSESSION</p>
                           <h2>
                             Choose your battleground
-                            <span className="count-badge">09</span>
+                            <span className="count-badge">{games.length}</span>
                           </h2>
                         </div>
                         <button
@@ -870,8 +901,11 @@ export default function DuelZone() {
                       </div>
                       <div className="game-grid">
                         {[
+                          ...frontierGames,
                           ...featuredGames,
-                          ...games.filter((g) => !isCompetition(g)),
+                          ...games.filter(
+                            (g) => !isCompetition(g) && !isFrontier(g),
+                          ),
                         ].map((g, i) => {
                           const Icon = gameIcons[g];
                           return (
@@ -894,15 +928,19 @@ export default function DuelZone() {
                                   Try a warm-up
                                   <ArrowUpRight size={14} />
                                 </span>
-                                <span className="game-number">0{i + 1}</span>
+                                <span className="game-number">
+                                  {String(i + 1).padStart(2, "0")}
+                                </span>
                               </button>
                               <div className="game-card-info">
                                 <div className="game-meta">
                                   <Icon size={14} />
                                   <span>
-                                    {isCompetition(g)
-                                      ? "NEW DISCIPLINE"
-                                      : "CLASSIC DUEL"}
+                                    {isFrontier(g)
+                                      ? "ACTION & TACTICS"
+                                      : isCompetition(g)
+                                        ? "SKILL DISCIPLINE"
+                                        : "CLASSIC DUEL"}
                                   </span>
                                   <span>1V1</span>
                                 </div>
@@ -938,13 +976,17 @@ export default function DuelZone() {
                       <div>
                         <strong>{GAME_INFO[game].name}</strong>
                         <span>
-                          {isCompetition(game)
-                            ? game === "arena"
-                              ? "6 stages"
-                              : game === "mind"
-                                ? "6 puzzles"
-                                : "45–60 seconds"
-                            : `${GAME_INFO[game].rounds} rounds`}{" "}
+                          {isFrontier(game)
+                            ? game === "showdown"
+                              ? "Best of five"
+                              : "90 seconds"
+                            : isCompetition(game)
+                              ? game === "arena"
+                                ? "6 stages"
+                                : game === "mind"
+                                  ? "6 puzzles"
+                                  : "45–60 seconds"
+                              : `${GAME_INFO[game].rounds} rounds`}{" "}
                           · {GAME_INFO[game].keys.toLowerCase()}
                         </span>
                       </div>
@@ -1051,7 +1093,7 @@ export default function DuelZone() {
                     <div className="arena-footer">
                       <span>BUILT FOR THE COMPETITIVE SPIRIT.</span>
                       <div>
-                        <span>9 skill games</span>
+                        <span>{games.length} competitive games</span>
                         <i />
                         <span>Real opponents</span>
                         <i />
@@ -1579,7 +1621,7 @@ export default function DuelZone() {
               </div>
               <span className="eyebrow">
                 {queue.game === "any"
-                  ? "QUICK MATCH · ALL NINE DISCIPLINES"
+                  ? "QUICK MATCH · ALL DISCIPLINES"
                   : GAME_INFO[queue.game].name}
               </span>
               {queue.game === "any" && (
@@ -1981,12 +2023,30 @@ function HistoryTable({ profile }: { profile: Profile }) {
                   <td>
                     {GAME_INFO[m.game].name}
                     <small className="table-sub">{m.mode}</small>
+                    {m.game === "showdown" && m.details?.length ? (
+                      <details className="history-series">
+                        <summary>Round breakdown</summary>
+                        {m.details.map((r, i) => (
+                          <div key={i}>
+                            {i + 1}. {GAME_INFO[r.game].name} ·{" "}
+                            {Object.values(r.scores).join(" : ")}
+                          </div>
+                        ))}
+                      </details>
+                    ) : null}
                   </td>
                   <td>{m.opponent}</td>
                   <td className="mono">
-                    {m.score.toLocaleString()}{" "}
+                    {(m.game === "showdown"
+                      ? m.score / 2
+                      : m.score
+                    ).toLocaleString()}{" "}
                     <span className="muted">
-                      / {m.opponent_score.toLocaleString()}
+                      /{" "}
+                      {(m.game === "showdown"
+                        ? m.opponent_score / 2
+                        : m.opponent_score
+                      ).toLocaleString()}
                     </span>
                   </td>
                   <td className={m.rating_change > 0 ? "accent" : "muted"}>

@@ -1,0 +1,487 @@
+.frontier-field {
+  width: 100%;
+  text-align: left;
+}
+.frontier-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 16px 0;
+}
+.frontier-heading h3 {
+  font-size: 22px;
+  margin: 5px 0;
+}
+.frontier-timer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.frontier-timer b {
+  font:
+    500 30px/1 ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+.frontier-timer span {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: #7e8890;
+}
+.frontier-stage {
+  position: relative;
+  border: 1px solid #333c43;
+  background: #0d1013;
+  overflow: hidden;
+}
+.frontier-stage canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 5/3;
+  touch-action: none;
+}
+.frontier-live-score {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 16px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.frontier-live-score span {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #10151bd9;
+  border: 1px solid #39434b;
+  padding: 7px 12px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  max-width: 45%;
+  overflow: hidden;
+}
+.frontier-live-score b {
+  font:
+    600 21px ui-monospace,
+    monospace;
+}
+.frontier-role {
+  position: absolute;
+  bottom: 15px;
+  left: 20px;
+  color: #c2b4df;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  background: #0d1013e6;
+  padding: 8px;
+}
+.frontier-countdown,
+.frontier-intermission {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: #0c1014a8;
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+.frontier-countdown b {
+  font-size: 90px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+.frontier-countdown span {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: #b1bdc3;
+}
+.frontier-intermission {
+  gap: 15px;
+  text-align: center;
+  padding: 20px;
+}
+.frontier-intermission h3 {
+  font-size: clamp(18px, 3vw, 32px);
+  margin: 0;
+}
+.frontier-intermission p {
+  margin: 0;
+  color: #b3bdc5;
+}
+.frontier-event {
+  position: absolute;
+  top: 35%;
+  width: 100%;
+  text-align: center;
+  font-size: clamp(24px, 5vw, 48px);
+  font-weight: 600;
+  letter-spacing: 4px;
+  color: #f0f3ef;
+  pointer-events: none;
+  text-shadow: 0 3px 20px #000;
+}
+.frontier-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+.frontier-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.frontier-actions button,
+.frontier-dpad button {
+  border: 1px solid #38424b;
+  border-radius: 4px;
+  background: #1a2127;
+  color: #d9e0e4;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 10px 13px;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.frontier-actions button:active,
+.frontier-dpad button:active {
+  background: #354139;
+  border-color: #b3d58a;
+  transform: translateY(1px);
+}
+.frontier-actions button i {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: #a4c77b;
+  transform-origin: left;
+  transition: transform 0.1s;
+}
+.frontier-actions kbd {
+  font-size: 9px;
+  color: #88949c;
+  font-family: inherit;
+}
+.frontier-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 35px);
+  grid-template-rows: repeat(2, 32px);
+  gap: 3px;
+  flex-shrink: 0;
+}
+.frontier-dpad button {
+  min-height: 0;
+  padding: 4px;
+}
+.frontier-dpad button:first-child {
+  grid-column: 2;
+}
+.frontier-dpad button:nth-child(2) {
+  grid-row: 2;
+  grid-column: 1;
+}
+.frontier-dpad button:nth-child(3) {
+  grid-row: 2;
+  grid-column: 2;
+}
+.frontier-dpad button:nth-child(4) {
+  grid-row: 2;
+  grid-column: 3;
+}
+.frontier-energy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #8b969e;
+}
+.frontier-energy > div {
+  height: 4px;
+  background: #272f36;
+  width: 120px;
+}
+.frontier-energy i {
+  display: block;
+  height: 100%;
+  background: #b7cf9b;
+  transition: width 0.1s;
+}
+.network-label {
+  margin-left: auto;
+}
+.frontier-instructions {
+  font-size: 12px !important;
+  line-height: 1.65 !important;
+  color: #94a0a9 !important;
+  margin: 12px 0 !important;
+}
+.showdown-progress {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.showdown-progress > span {
+  flex: 1;
+  font-size: 10px;
+  color: #6c7882;
+  padding: 10px 6px;
+  border-bottom: 2px solid #2d363e;
+  text-align: center;
+}
+.showdown-progress > span.current {
+  border-color: #d8caa7;
+  color: #e3d8bc;
+}
+.showdown-progress > span.complete {
+  border-color: #63765e;
+  color: #a8b9a1;
+}
+.showdown-progress > b {
+  margin-left: 10px;
+  white-space: nowrap;
+}
+.series-recap {
+  max-width: 680px;
+  margin: 20px auto;
+  text-align: left;
+  width: 100%;
+}
+.series-recap > div:not(.frontier-stats) {
+  display: grid;
+  grid-template-columns: 25px 1.4fr 0.7fr 1fr;
+  gap: 10px;
+  border-bottom: 1px solid #303940;
+  padding: 12px 0;
+  align-items: center;
+  font-size: 12px;
+}
+.series-recap > div > span:first-child {
+  color: #70808c;
+}
+.series-recap > div > span:last-child {
+  text-align: right;
+  color: #c5d5b5;
+}
+.frontier-stats {
+  display: flex;
+  gap: 15px;
+  margin-top: 15px;
+  font-size: 11px;
+  color: #94a1aa;
+}
+.frontier-stats > span {
+  flex: 1;
+  display: grid;
+  gap: 5px;
+}
+.frontier-stats b {
+  font-size: 12px;
+  color: #d2d9dd;
+}
+.frontier-practice {
+  max-width: 1000px;
+  width: 100%;
+}
+.modal:has(.frontier-practice) {
+  width: min(1040px, 96vw);
+  max-width: 1040px;
+}
+.showdown-feature {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 30px;
+  align-items: center;
+  border: 1px solid #3a4147;
+  border-left: 3px solid #d8caa7;
+  background: #181d22;
+  padding: 28px;
+  margin: 22px 0;
+}
+.showdown-feature h2 {
+  font-size: 30px;
+  letter-spacing: -1px;
+  margin: 8px 0;
+}
+.showdown-feature p {
+  font-size: 13px;
+  color: #96a1a9;
+  max-width: 650px;
+  line-height: 1.7;
+  margin: 0;
+}
+.showdown-feature .eyebrow {
+  color: #c8bfa6;
+}
+.showdown-feature > div:last-child {
+  display: grid;
+  gap: 10px;
+}
+.frontier-art {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  color: var(--game-color);
+}
+.frontier-art svg {
+  width: 100%;
+  height: 100%;
+}
+.frontier-art .art-title {
+  position: absolute;
+  bottom: 18px;
+  left: 20px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #a0adb5;
+}
+.frontier-art .art-orbit {
+  transform-origin: center;
+  animation: frontier-orbit 18s linear infinite;
+}
+.frontier-art .art-runner {
+  animation: frontier-shift 4s ease-in-out infinite alternate;
+}
+@keyframes frontier-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes frontier-shift {
+  to {
+    transform: translate(25px, -12px);
+  }
+}
+@media (max-width: 700px) {
+  .showdown-feature {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    padding: 22px;
+  }
+  .showdown-feature > div:last-child {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .showdown-feature h2 {
+    font-size: 26px;
+  }
+  .frontier-heading h3 {
+    font-size: 19px;
+  }
+  .frontier-actions button {
+    padding: 9px;
+    font-size: 11px;
+    gap: 5px;
+    min-height: 42px;
+  }
+  .frontier-actions kbd {
+    display: none;
+  }
+  .frontier-live-score {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+  }
+  .frontier-live-score span {
+    font-size: 8px;
+    padding: 4px 7px;
+    gap: 7px;
+  }
+  .frontier-live-score b {
+    font-size: 15px;
+  }
+  .frontier-controls {
+    gap: 8px;
+  }
+  .frontier-role {
+    bottom: 5px;
+    left: 5px;
+    font-size: 8px;
+    padding: 5px;
+  }
+  .showdown-progress > span {
+    font-size: 8px;
+  }
+  .frontier-intermission {
+    gap: 8px;
+  }
+  .frontier-intermission p {
+    font-size: 12px;
+  }
+  .frontier-countdown b {
+    font-size: 50px;
+  }
+  .series-recap > div:not(.frontier-stats) {
+    font-size: 10px;
+    gap: 5px;
+  }
+  .arena-wrap:has(.frontier-field) {
+    padding: 12px;
+  }
+  .arena-wrap:has(.frontier-field) .scoreboard {
+    margin: 10px 0;
+  }
+  .arena-wrap:has(.frontier-field) .score-player h2 {
+    font-size: 13px;
+  }
+  .arena-wrap:has(.frontier-field) .score-player > strong {
+    font-size: 22px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .frontier-art .art-orbit,
+  .frontier-art .art-runner {
+    animation: none;
+  }
+  .frontier-actions button,
+  .frontier-energy i {
+    transition: none;
+  }
+}
+
+.history-series {
+  font-size: 10px;
+  color: #9cabb4;
+  margin-top: 6px;
+  max-width: 240px;
+  white-space: normal;
+}
+.history-series summary {
+  cursor: pointer;
+  color: #c4d0b2;
+}
+.history-series > div {
+  padding: 5px 0;
+  border-bottom: 1px solid #313a41;
+}
+
+.arena-wrap:has(.frontier-field) .arena-header {
+  height: 54px;
+}
+.arena-wrap:has(.frontier-field) .scoreboard {
+  padding: 14px 12px;
+}
+.arena-wrap:has(.frontier-field) .round-summary {
+  display: none;
+}
+@media (min-width: 701px) {
+  .arena-wrap:has(.frontier-field) .frontier-stage {
+    max-width: min(100%, calc((100dvh - 300px) * 1.6667));
+    margin-inline: auto;
+  }
+}

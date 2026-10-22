@@ -9,7 +9,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: duelzone
@@ -29,3 +29,4 @@ jobs:
       - run: npm run test:live
       - run: npm run test:experience
       - run: npm run test:social
+      - run: npm run test:frontier

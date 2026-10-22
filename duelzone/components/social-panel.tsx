@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import Modal from "./modal";
+import { FrontierField } from "./frontier-field";
 import { CompetitionField } from "./competition-field";
 import {
   GAME_INFO,
@@ -57,7 +58,7 @@ const privacyLabels: Record<keyof Privacy, [string, string]> = {
   ],
   spectators: [
     "Allow spectators",
-    "Opt in to watching for Dodge, Grid and Aim Clash. Both players must allow it.",
+    "Let friends watch supported arena games. Both players must allow it.",
   ],
 };
 function Avatar({ player }: { player: Player }) {
@@ -606,7 +607,7 @@ export function SocialPanel({
                         setRules((r) => ({ ...r, spectators: false }));
                       }}
                     >
-                      <option value="any">Random · all nine games</option>
+                      <option value="any">Random · all games</option>
                       {games.map((g) => (
                         <option value={g} key={g}>
                           {GAME_INFO[g].name}
@@ -653,8 +654,8 @@ export function SocialPanel({
                     <span>
                       Allow friends to spectate
                       <small>
-                        Choose Dodge, Grid or Aim Clash. Both players must
-                        enable spectators in Privacy.
+                        Available in supported arenas. Both players must enable
+                        spectators in Privacy.
                       </small>
                     </span>
                   </label>
@@ -1322,6 +1323,13 @@ export function SocialPanel({
                 </h3>
                 <p>The match has finished.</p>
               </div>
+            ) : watch.frontier ? (
+              <FrontierField
+                state={watch}
+                userId={watch.players[0].id}
+                onAction={() => {}}
+                readOnly
+              />
             ) : watch.competition ? (
               <CompetitionField
                 state={watch}

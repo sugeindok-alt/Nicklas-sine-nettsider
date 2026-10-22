@@ -10,12 +10,13 @@ import {
   type Challenge,
 } from "../lib/shared";
 
-export type Action = CompetitionAction & {
-  challengeId: string;
-  x?: number;
-  y?: number;
-  choice?: number;
-};
+export type Action = CompetitionAction &
+  Partial<import("../lib/frontier").Control> & {
+    challengeId: string;
+    x?: number;
+    y?: number;
+    choice?: number;
+  };
 export function scoreAction(
   game: Game,
   challenge: Challenge,
@@ -95,7 +96,7 @@ export class Match {
       rematch: [],
     };
   }
-  snapshot() {
+  snapshot(_viewer?: string) {
     return { ...this.state, serverNow: Date.now() };
   }
   private emit() {

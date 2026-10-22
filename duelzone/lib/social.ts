@@ -9,7 +9,15 @@ export const defaultRules: MatchRules = {
   spectators: false,
 };
 export const lengthScale = { quick: 2 / 3, standard: 1, extended: 1.5 };
-export const watchableGames: readonly Game[] = ["dodge", "grid", "clash"];
+export const watchableGames: readonly Game[] = [
+  "dodge",
+  "grid",
+  "clash",
+  "knockout",
+  "ball",
+  "grapple",
+  "core",
+];
 export type Privacy = {
   requests: boolean;
   messages: boolean;

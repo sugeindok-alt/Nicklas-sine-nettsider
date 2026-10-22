@@ -2,7 +2,7 @@ import type { MatchState } from "./shared";
 export type MatchFrame = Pick<
   MatchState,
   "id" | "serverNow" | "scores" | "competition" | "deadline" | "round"
->;
+> & { frontier?: Partial<import("./frontier").FrontierView> };
 let current: MatchState | null = null;
 const listeners = new Set<() => void>();
 export const network = { rtt: 0 };
@@ -26,7 +26,14 @@ export const matchFeed = {
       frame.serverNow <= current.serverNow
     )
       return;
-    current = { ...current, ...frame };
+    current = {
+      ...current,
+      ...frame,
+      frontier:
+        frame.frontier && current.frontier
+          ? { ...current.frontier, ...frame.frontier }
+          : current.frontier,
+    };
     listeners.forEach((f) => f());
   },
 };

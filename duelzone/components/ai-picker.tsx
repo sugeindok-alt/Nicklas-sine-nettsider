@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Bot, ArrowRight, Check } from "lucide-react";
+import { frontierGames, isFrontier } from "@/lib/frontier";
 import { featuredGames, GAME_INFO, type Game } from "@/lib/shared";
 import { difficulties, type Difficulty } from "@/lib/bot";
 const descriptions = {
@@ -19,7 +20,8 @@ export function AIPicker({
   busy: boolean;
 }) {
   const [game, setGame] = useState<Game>(
-    featuredGames.includes(initial as (typeof featuredGames)[number])
+    isFrontier(initial) ||
+      featuredGames.includes(initial as (typeof featuredGames)[number])
       ? initial
       : "dodge",
   );
@@ -33,7 +35,7 @@ export function AIPicker({
       <label className="ai-game-label">
         Choose your discipline
         <select value={game} onChange={(e) => setGame(e.target.value as Game)}>
-          {featuredGames.map((g) => (
+          {[...frontierGames, ...featuredGames].map((g) => (
             <option value={g} key={g}>
               {GAME_INFO[g].name}
             </option>

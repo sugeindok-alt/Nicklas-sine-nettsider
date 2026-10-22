@@ -12,12 +12,21 @@ import {
 import { sessionPlayer } from "./auth";
 import { Database } from "./db";
 import { Match } from "./game";
+import { FrontierMatch } from "./frontier-match";
+import { isFrontier } from "../lib/frontier";
 import { LiveMatch } from "./live-match";
 import { difficulties, type Difficulty } from "../lib/bot";
 import { Social } from "./social";
 import { lengthScale, type MatchRules } from "../lib/social";
 
 const gameSchema = z.enum(games);
+function compactFrontier(
+  v: import("../lib/frontier").FrontierView | undefined,
+) {
+  if (!v) return undefined;
+  const { walls, anchors, checkpoints, map, width, height, ...frame } = v;
+  return frame;
+}
 export function realtime(
   http: HTTPServer,
   db: Database,
@@ -104,7 +113,11 @@ export function realtime(
   ) {
     const people = await Promise.all(ids.map((id) => db.player(id)));
     if (people.some((p) => !p)) throw new Error("Player unavailable");
-    const MatchType = isCompetition(game) ? LiveMatch : Match;
+    const MatchType = isFrontier(game)
+      ? FrontierMatch
+      : isCompetition(game)
+        ? LiveMatch
+        : Match;
     let lastPhase = "";
     const match = new MatchType(
       people as Player[],
@@ -114,19 +127,25 @@ export function realtime(
         social.broadcast(state);
         const phase = `${state.phase}:${state.challenge?.id}`;
         const frame =
-          state.phase === "active" && state.competition && lastPhase === phase;
+          state.phase === "active" &&
+          (state.competition || state.frontier) &&
+          lastPhase === phase;
         for (const id of ids) {
           const socket = sockets.get(id);
+          const personal = state.frontier ? match.snapshot(id) : state;
           if (frame && socket?.handshake.auth.frames) {
             socket.volatile.emit("frame", {
               id: state.id,
               serverNow: state.serverNow,
               scores: state.scores,
               competition: state.competition,
+              frontier: compactFrontier(
+                state.frontier ? match.snapshot(id).frontier : undefined,
+              ),
               deadline: state.deadline,
               round: state.round,
             });
-          } else socket?.emit("match", state);
+          } else socket?.emit("match", personal);
         }
         lastPhase = phase;
       },
@@ -144,7 +163,7 @@ export function realtime(
     );
     if (rules) {
       match.state.rules = rules;
-      if (!isCompetition(game))
+      if (!isCompetition(game) && !isFrontier(game))
         match.state.rounds = Math.max(
           3,
           Math.round(match.state.rounds * lengthScale[rules.length]),
@@ -179,7 +198,8 @@ export function realtime(
         difficulty,
       };
       let previous = "";
-      const match = new LiveMatch(
+      const AIType = isFrontier(game) ? FrontierMatch : LiveMatch;
+      const match = new AIType(
         [human, bot],
         game,
         "ai",
@@ -196,10 +216,14 @@ export function realtime(
               serverNow: state.serverNow,
               scores: state.scores,
               competition: state.competition,
+              frontier: compactFrontier(
+                state.frontier ? match.snapshot(id).frontier : undefined,
+              ),
               deadline: state.deadline,
               round: state.round,
             });
-          else socket?.emit("match", state);
+          else
+            socket?.emit("match", state.frontier ? match.snapshot(id) : state);
           previous = phase;
         },
         async () => ({}),
@@ -364,7 +388,7 @@ export function realtime(
     clearTimeout(disconnects.get(p.id));
     disconnects.delete(p.id);
     const previous = active.get(p.id);
-    if (previous) socket.emit("match", matches.get(previous)?.snapshot());
+    if (previous) socket.emit("match", matches.get(previous)?.snapshot(p.id));
     lobby();
     socialUpdate(p.id);
     let events = 0;
@@ -429,7 +453,7 @@ export function realtime(
     event("ai:start", async (data) => {
       const { game, difficulty } = z
         .object({
-          game: gameSchema.refine(isCompetition),
+          game: gameSchema.refine((g) => isCompetition(g) || isFrontier(g)),
           difficulty: z.enum(difficulties),
         })
         .parse(data);
@@ -515,6 +539,11 @@ export function realtime(
           target: z.string().max(40).optional(),
           puzzleId: z.string().max(40).optional(),
           ability: z.boolean().optional(),
+          primary: z.boolean().optional(),
+          secondary: z.boolean().optional(),
+          jump: z.boolean().optional(),
+          aimX: z.number().min(-1).max(1).optional(),
+          aimY: z.number().min(-1).max(1).optional(),
           dx: z.number().min(-1).max(1).optional(),
           dy: z.number().min(-1).max(1).optional(),
           seq: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),

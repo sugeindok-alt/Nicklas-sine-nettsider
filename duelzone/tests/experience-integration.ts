@@ -89,7 +89,14 @@ async function create(i: number) {
   });
   socket.on("frame", (f: MatchFrame) => {
     if (c.state?.id !== f.id) return;
-    c.state = { ...c.state, ...f };
+    c.state = {
+      ...c.state,
+      ...f,
+      frontier:
+        f.frontier && c.state.frontier
+          ? { ...c.state.frontier, ...f.frontier }
+          : c.state.frontier,
+    };
     c.frames++;
     c.bytes += JSON.stringify(f).length;
     c.baseline += JSON.stringify(c.state).length;

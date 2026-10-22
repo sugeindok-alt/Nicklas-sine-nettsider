@@ -1,4 +1,6 @@
 "use client";
+import { FrontierField, FrontierPractice, SeriesRecap } from "./frontier-field";
+import { isFrontier } from "@/lib/frontier";
 import { MatchIntro } from "./match-intro";
 import { AnimatedNumber } from "./animated-number";
 import { matchFeed } from "@/lib/match-feed";
@@ -395,7 +397,13 @@ function Arena({
                 <h2>{p.username}</h2>
               </div>
               <strong>
-                <AnimatedNumber value={state.scores[p.id]} />
+                <AnimatedNumber
+                  value={
+                    state.game === "showdown"
+                      ? state.scores[p.id] / 2
+                      : state.scores[p.id]
+                  }
+                />
               </strong>
               {i === 0 && <div className="versus">VS</div>}
             </div>
@@ -464,6 +472,9 @@ function Arena({
                   ))}
                 </div>
               )}
+              {state.frontier && (
+                <SeriesRecap view={state.frontier} players={state.players} />
+              )}
               <div className="result-actions">
                 {state.mode !== "tournament" && (
                   <button
@@ -504,7 +515,13 @@ function Arena({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              {state.competition ? (
+              {state.frontier ? (
+                <FrontierField
+                  state={state}
+                  userId={userId}
+                  onAction={onAction}
+                />
+              ) : state.competition ? (
                 <CompetitionField
                   state={state}
                   userId={userId}
@@ -540,7 +557,9 @@ function Arena({
 }
 
 export function Practice(props: { game: Game; onClose: () => void }) {
-  return isCompetition(props.game) ? (
+  return isFrontier(props.game) ? (
+    <FrontierPractice {...props} />
+  ) : isCompetition(props.game) ? (
     <CompetitionPractice {...props} />
   ) : (
     <ClassicPractice {...props} />

@@ -1,5 +1,7 @@
 import type { CompetitionView } from "./competition";
+import { frontierGames, FRONTIER_INFO } from "./frontier";
 export const games = [
+  ...frontierGames,
   "reaction",
   "aim",
   "speed",
@@ -22,6 +24,7 @@ export const isCompetition = (game: string) =>
 export type Game = (typeof games)[number];
 export type Mode = "ranked" | "casual" | "friend" | "tournament" | "ai";
 export const GAME_INFO = {
+  ...FRONTIER_INFO,
   dodge: {
     name: "Dodge Duel",
     short: "Dodge",
@@ -163,6 +166,7 @@ export type MatchState = {
   changes?: Record<string, number>;
   rematch: string[];
   competition?: CompetitionView;
+  frontier?: import("./frontier").FrontierView;
   rewards?: Record<
     string,
     { xp: number; achievements: string[]; daily: string[] }
