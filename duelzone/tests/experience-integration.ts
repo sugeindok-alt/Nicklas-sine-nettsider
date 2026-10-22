@@ -142,6 +142,21 @@ try {
   console.log(
     "PASS Quick Match cancellation and compatibility with a selected-game queue.",
   );
+  const reconnectMatch = b.state!.id,
+    reconnectFull = b.full;
+  b.socket.disconnect();
+  await pause(200);
+  await new Promise<void>((yes, no) => {
+    b.socket.once("connect", yes);
+    b.socket.once("connect_error", no);
+    b.socket.connect();
+  });
+  await until(
+    () =>
+      b.full > reconnectFull &&
+      b.state?.id === reconnectMatch &&
+      b.state.phase === "active",
+  );
   let seq = 0;
   const start = Date.now();
   const delayed = new Set<ReturnType<typeof setTimeout>>();
@@ -180,14 +195,6 @@ try {
   console.log(
     `PASS two simultaneous moving WebSocket clients with delayed/jittered inputs: ${a.frames}/${b.frames} compact frames; ${(100 * (1 - a.bytes / a.baseline)).toFixed(1)}% fewer bytes than full snapshots.`,
   );
-  b.socket.disconnect();
-  await pause(200);
-  await new Promise<void>((yes, no) => {
-    b.socket.once("connect", yes);
-    b.socket.once("connect_error", no);
-    b.socket.connect();
-  });
-  await until(() => Boolean(b.state?.competition));
   await command(a, "match:leave");
   await until(
     () => a.state?.phase === "finished" && b.state?.phase === "finished",
