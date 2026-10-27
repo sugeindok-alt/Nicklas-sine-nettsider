@@ -17,7 +17,9 @@ export function AnimatedNumber({ value }: { value: number }) {
       onUpdate: (n) => {
         previous.current = n;
         if (node.current)
-          node.current.textContent = Math.round(n).toLocaleString();
+          node.current.textContent = (
+            Number.isInteger(value) ? Math.round(n) : Math.round(n * 10) / 10
+          ).toLocaleString();
       },
     });
     return () => controls.stop();

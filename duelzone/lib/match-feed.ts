@@ -5,7 +5,17 @@ export type MatchFrame = Pick<
 > & { frontier?: Partial<import("./frontier").FrontierView> };
 let current: MatchState | null = null;
 const listeners = new Set<() => void>();
-export const network = { rtt: 0 };
+export const network = { rtt: 0, samples: [] as number[], total: 0, failed: 0 };
+export function recordProbe(rtt: number | null) {
+  network.total++;
+  if (rtt === null) {
+    network.failed++;
+    return;
+  }
+  network.rtt = rtt;
+  network.samples.push(rtt);
+  if (network.samples.length > 20) network.samples.shift();
+}
 export const matchFeed = {
   get: () => current,
   subscribe: (listener: () => void) => {

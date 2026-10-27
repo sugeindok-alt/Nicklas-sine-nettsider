@@ -15,7 +15,7 @@ export function PlayerAvatar({
 }) {
   return (
     <span
-      className={`avatar ${className}`}
+      className={`avatar cosmetic-frame-${player.cosmetic || "graphite"} ${className}`}
       style={{ color: player.accent, background: `${player.accent}15` }}
     >
       {player.avatar ? (
@@ -44,6 +44,12 @@ export function ProfileExtras({
     max = Math.max(...points.map((p) => p.rating), profile.rating.rating) + 30;
   return (
     <>
+      {profile.player.mastery_badge && (
+        <span className="mastery-nameplate">
+          {GAME_INFO[profile.player.mastery_badge].short.toUpperCase()}{" "}
+          SPECIALIST
+        </span>
+      )}
       <div className="profile-toolbar">
         <button
           className="button secondary compact"
@@ -326,7 +332,7 @@ export function ProfileMediaEditor({
         </button>
       </div>
       <fieldset className="cosmetic-choices">
-        <legend>Earned profile finishes</legend>
+        <legend>Player card, frame & match finish</legend>
         {[
           {
             id: "graphite",
@@ -366,6 +372,10 @@ export function ProfileMediaEditor({
           </button>
         ))}
       </fieldset>
+      <p className="small muted">
+        Your selected finish follows your profile card, avatar frame, match
+        introduction and victory presentation. It changes no game mechanics.
+      </p>
       <button className="button primary" disabled={busy}>
         Save appearance <Check size={16} />
       </button>

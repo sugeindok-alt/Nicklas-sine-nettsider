@@ -22,7 +22,13 @@ export const featuredGames = [
 export const isCompetition = (game: string) =>
   (featuredGames as readonly string[]).includes(game);
 export type Game = (typeof games)[number];
-export type Mode = "ranked" | "casual" | "friend" | "tournament" | "ai";
+export type Mode =
+  | "ranked"
+  | "casual"
+  | "friend"
+  | "tournament"
+  | "ai"
+  | "ghost";
 export const GAME_INFO = {
   ...FRONTIER_INFO,
   dodge: {
@@ -128,6 +134,7 @@ export function rankFor(rating: number) {
   return [...RANKS].reverse().find((r) => rating >= r.min)!;
 }
 export type Player = {
+  mastery_badge?: Game | "";
   avatar?: string;
   banner?: string;
   cosmetic?: string;
@@ -137,6 +144,7 @@ export type Player = {
   bio: string;
   rating?: number;
   bot?: boolean;
+  ghost?: boolean;
   difficulty?: import("./bot").Difficulty;
 };
 export type Challenge = {
@@ -149,6 +157,7 @@ export type Challenge = {
   period?: number;
 };
 export type MatchState = {
+  ghost?: { replayId: string; sourceId: string };
   rules?: import("./social").MatchRules;
   id: string;
   game: Game;

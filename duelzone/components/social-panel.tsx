@@ -50,6 +50,14 @@ type FriendProfile = {
   records: { game: Game; best: number; played: number }[];
 };
 const privacyLabels: Record<keyof Privacy, [string, string]> = {
+  replays: [
+    "Share match replays",
+    "Allow friends and shared links to replay supported matches and race recorded Grapple ghosts. Both players must allow it.",
+  ],
+  activity: [
+    "Share competitive activity",
+    "Let friends see your wins, personal records and completed daily circuits. Off by default.",
+  ],
   requests: ["Friend requests", "Let players send you requests."],
   messages: ["Private messages", "Allow messages from your friends."],
   challenges: ["Direct challenges", "Receive live invitations from friends."],
@@ -180,11 +188,32 @@ export function SocialPanel({
     window.addEventListener("dz:friends", openSocial);
     return () => window.removeEventListener("dz:friends", openSocial);
   }, []);
+  useEffect(() => {
+    const watchLobby = (e: Event) => {
+      const target = (e as CustomEvent).detail?.target;
+      if (target)
+        void command("social:watch", { target })
+          .then((r) => {
+            setWatch(r.state);
+            setOpen(false);
+          })
+          .catch((e) => setNotice({ text: e.message, kind: "spectate" }));
+    };
+    window.addEventListener("dz:lobby-watch", watchLobby);
+    return () => window.removeEventListener("dz:lobby-watch", watchLobby);
+  }, [command]);
   const refresh = useCallback(async () => {
     if (!connected) return;
     try {
       const r = await command("social:state");
-      if (mounted.current) setSocial(r.social);
+      if (mounted.current) {
+        setSocial(r.social);
+        setError((previous) =>
+          previous === "The live connection is not ready. Please wait a moment."
+            ? ""
+            : previous,
+        );
+      }
     } catch (e) {
       if (mounted.current) setError((e as Error).message);
     }

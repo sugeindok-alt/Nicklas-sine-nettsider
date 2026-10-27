@@ -40,7 +40,8 @@ export function PartyPanel({
     [busy, setBusy] = useState(false),
     [game, setGame] = useState<Game | "any">("any"),
     [rules, setRules] = useState<MatchRules>(defaultRules),
-    [target, setTarget] = useState("");
+    [target, setTarget] = useState(""),
+    [chat, setChat] = useState("");
   const party = state?.party,
     host = party?.host_id === user.id,
     mine = party?.members.find((m) => m.id === user.id),
@@ -55,7 +56,13 @@ export function PartyPanel({
   useEffect(() => {
     setGame(party?.game || "any");
     setRules(party?.rules || defaultRules);
-  }, [party?.id, party?.game, party?.rules.length, party?.rules.spectators]);
+  }, [
+    party?.id,
+    party?.game,
+    party?.rules.length,
+    party?.rules.spectators,
+    party?.rules.draft,
+  ]);
   useEffect(() => {
     if (matchId) setOpen(false);
   }, [matchId]);
@@ -78,15 +85,15 @@ export function PartyPanel({
         aria-label="Open party"
       >
         <Users size={17} />
-        <span>{party ? `${party.members.length}/2 party` : "Party"}</span>
+        <span>{party ? `${party.members.length}/8 lobby` : "Party"}</span>
         {invites.length > 0 && <b>{invites.length}</b>}
       </button>
       {open && (
         <Modal title="Better with a rival." onClose={() => setOpen(false)}>
           <div className="party-panel">
             <p className="muted small">
-              A private two-player room. Choose the rules together, ready up and
-              settle it in the arena.
+              Up to eight friends. Two active players, six spectator seats.
+              Choose the rules, ready up and settle it in the arena.
             </p>
             {error && (
               <p className="form-error" role="alert">
@@ -164,6 +171,25 @@ export function PartyPanel({
                           {m.online ? "Online" : "Offline / status private"}
                         </small>
                       </span>
+                      {host ? (
+                        <select
+                          className="party-seat-select"
+                          aria-label={`Seat for ${m.username}`}
+                          value={m.role}
+                          disabled={busy || !connected}
+                          onChange={(e) =>
+                            void act("party:seat", {
+                              target: m.id,
+                              role: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="player">Player</option>
+                          <option value="spectator">Spectator</option>
+                        </select>
+                      ) : (
+                        <small className="party-role">{m.role}</small>
+                      )}
                       <em className={m.ready ? "ready" : ""}>
                         {m.ready ? "Ready" : "Not ready"}
                       </em>
@@ -188,7 +214,7 @@ export function PartyPanel({
                     </div>
                   )}
                 </div>
-                {host && party.members.length < 2 && (
+                {host && party.members.length < 8 && (
                   <form
                     className="party-invite-form"
                     onSubmit={(e) => {
@@ -208,7 +234,9 @@ export function PartyPanel({
                       {social?.friends
                         .filter(
                           (f) =>
-                            f.presence === "online" || f.presence === "away",
+                            (f.presence === "online" ||
+                              f.presence === "away") &&
+                            !party.members.some((m) => m.id === f.id),
                         )
                         .map((f) => (
                           <option key={f.id} value={f.id}>
@@ -268,6 +296,19 @@ export function PartyPanel({
                       <option value="extended">Extended</option>
                     </select>
                   </label>
+                  {game === "showdown" && (
+                    <label className="party-spectators">
+                      <input
+                        type="checkbox"
+                        checked={!!rules.draft}
+                        disabled={!host || busy}
+                        onChange={(e) =>
+                          setRules((r) => ({ ...r, draft: e.target.checked }))
+                        }
+                      />
+                      Draft a best-of-three series (off: random best-of-five)
+                    </label>
+                  )}
                   <label className="party-spectators">
                     <input
                       type="checkbox"
@@ -298,6 +339,26 @@ export function PartyPanel({
                     Saving rules resets both ready states. Matches are unranked.
                   </small>
                 </form>
+                {mine?.role === "spectator" && party.watching && (
+                  <button
+                    className="button primary"
+                    onClick={() => {
+                      setOpen(false);
+                      window.dispatchEvent(
+                        new CustomEvent("dz:lobby-watch", {
+                          detail: {
+                            target: party.members.find(
+                              (m) => m.role === "player",
+                            )?.id,
+                          },
+                        }),
+                      );
+                    }}
+                  >
+                    Watch lobby match
+                    <ArrowUpRight size={16} />
+                  </button>
+                )}
                 <div className="party-actions">
                   <button
                     className={`button ${mine?.ready ? "secondary" : "primary"}`}
@@ -315,8 +376,11 @@ export function PartyPanel({
                       disabled={
                         busy ||
                         !connected ||
-                        party.members.length !== 2 ||
-                        !party.members.every((m) => m.ready)
+                        party.members.filter((m) => m.role === "player")
+                          .length !== 2 ||
+                        !party.members
+                          .filter((m) => m.role === "player")
+                          .every((m) => m.ready)
                       }
                       onClick={() => void act("party:launch")}
                     >
@@ -324,6 +388,51 @@ export function PartyPanel({
                     </button>
                   )}
                 </div>
+                <section className="lobby-chat" aria-label="Lobby chat">
+                  <h3>Room conversation</h3>
+                  <div className="lobby-chat-messages" aria-live="polite">
+                    {party.messages?.length ? (
+                      party.messages.map((m) => (
+                        <p key={m.id}>
+                          <b>{m.username}</b>
+                          <span>{m.body}</span>
+                        </p>
+                      ))
+                    ) : (
+                      <p className="muted">
+                        Only members of this lobby can read these messages.
+                      </p>
+                    )}
+                  </div>
+                  <form
+                    className="party-invite-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const body = chat.trim();
+                      if (body) {
+                        void act("party:message", {
+                          id: crypto.randomUUID(),
+                          body,
+                        });
+                        setChat("");
+                      }
+                    }}
+                  >
+                    <input
+                      aria-label="Message your lobby"
+                      placeholder="Message your lobby…"
+                      maxLength={600}
+                      value={chat}
+                      onChange={(e) => setChat(e.target.value)}
+                    />
+                    <button
+                      className="button secondary compact"
+                      disabled={busy || !connected || !chat.trim()}
+                    >
+                      Send
+                    </button>
+                  </form>
+                </section>
                 <button
                   className="text-button muted"
                   disabled={busy}

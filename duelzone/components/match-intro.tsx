@@ -26,12 +26,17 @@ export function MatchIntro({
       exit={{ opacity: 0, scale: 0.98 }}
     >
       <span className="eyebrow">
-        {state.mode === "ai" ? "AI PRACTICE READY" : "OPPONENT FOUND"}
+        {state.mode === "ghost"
+          ? "RECORDED GHOST READY"
+          : state.mode === "ai"
+            ? "AI PRACTICE READY"
+            : "OPPONENT FOUND"}
       </span>
       <div className="intro-players">
         {state.players.map((p, i) => (
           <motion.div
             key={p.id}
+            data-finish={p.cosmetic || "graphite"}
             initial={{ opacity: 0, x: i ? 35 : -35 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.35, delay: i * 0.12 }}
@@ -40,16 +45,31 @@ export function MatchIntro({
               className="intro-avatar"
               style={{ color: p.accent, borderColor: `${p.accent}55` }}
             >
-              {p.bot ? "AI" : p.username.slice(0, 2).toUpperCase()}
+              {p.avatar ? (
+                <img src={p.avatar} alt="" />
+              ) : p.ghost ? (
+                "GH"
+              ) : p.bot ? (
+                "AI"
+              ) : (
+                p.username.slice(0, 2).toUpperCase()
+              )}
             </div>
             <strong>{p.username}</strong>
             <small>
-              {p.bot
-                ? "BOT · " + p.difficulty
-                : p.id === userId
-                  ? "YOU"
-                  : "YOUR OPPONENT"}
+              {p.ghost
+                ? "RECORDED PERFORMANCE"
+                : p.bot
+                  ? "BOT · " + p.difficulty
+                  : p.id === userId
+                    ? "YOU"
+                    : "YOUR OPPONENT"}
             </small>
+            {p.mastery_badge && (
+              <span className="mastery-nameplate">
+                {GAME_INFO[p.mastery_badge].short} specialist
+              </span>
+            )}
             {i === 0 && <span className="intro-vs">VS</span>}
           </motion.div>
         ))}

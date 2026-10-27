@@ -655,7 +655,7 @@ export function FrontierField({
               : readOnly
                 ? "LIVE SPECTATOR"
                 : v.series
-                  ? `SHOWDOWN / ROUND ${v.round} OF 5`
+                  ? `SHOWDOWN / ROUND ${v.round} OF ${state.rounds}`
                   : v.map}
           </span>
           <h3>{FRONTIER_INFO[v.game].name}</h3>
@@ -667,7 +667,7 @@ export function FrontierField({
       </div>
       {v.series && (
         <div className="showdown-progress">
-          {Array.from({ length: 5 }, (_, i) => (
+          {Array.from({ length: state.rounds }, (_, i) => (
             <span
               key={i}
               className={

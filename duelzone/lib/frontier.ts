@@ -66,7 +66,7 @@ export const FRONTIER_INFO = {
     short: "Showdown",
     tag: "ONE RIVAL. FIVE DISCIPLINES.",
     description:
-      "A best-of-five series across Knockout, Momentum, Grapple, Shadow and Core, drawn in a new random order. Win three rounds to take the series. Tied rounds share a point; after five rounds, the higher total wins.",
+      "Compete across Knockout, Momentum, Grapple, Shadow and Core. Ranked uses a pick-and-ban best-of-three; casual keeps a random best-of-five. Tied rounds split a point. The higher series total wins.",
     rounds: 5,
     color: "#e0d5b4",
     keys: "BEST OF FIVE · ADAPT EACH ROUND",
@@ -294,6 +294,7 @@ export class Frontier {
     now: number,
     private random = Math.random,
     private scale = 1,
+    selected?: Sport[],
   ) {
     this.schedule = ["knockout", "ball", "grapple", "shadow", "core"];
     if (game === "showdown")
@@ -305,6 +306,14 @@ export class Frontier {
         ];
       }
     else this.schedule = [game];
+    if (
+      game === "showdown" &&
+      selected &&
+      selected.length === 3 &&
+      new Set(selected).size === 3 &&
+      selected.every((g) => this.schedule.includes(g))
+    )
+      this.schedule = [...selected];
     const zero = () => Object.fromEntries(ids.map((id) => [id, 0]));
     this.scoresBase = zero();
     this.previous = now;
@@ -809,8 +818,9 @@ export class Frontier {
         v.seriesScore[id] += winner ? (winner === id ? 1 : 0) : 0.5;
     if (
       !v.series ||
-      v.round >= 5 ||
-      Math.max(...Object.values(v.seriesScore)) >= 3
+      v.round >= this.schedule.length ||
+      Math.max(...Object.values(v.seriesScore)) >=
+        Math.floor(this.schedule.length / 2) + 1
     )
       v.ended = true;
     else {

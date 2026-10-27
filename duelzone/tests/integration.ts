@@ -335,6 +335,8 @@ try {
     409,
   );
   const stops = entrants.map((p, i) => p.autoPlay(150 + i * 90));
+  for (const p of entrants)
+    await p.command("tournament:ready", { id: t.id, ready: true });
   await host.command("tournament:start", { id: t.id });
   const semifinal = await host.state(
     (s) => s.mode === "tournament" && s.phase === "finished",

@@ -204,7 +204,7 @@ Notifications for requests, direct challenges, parties, tournament invitations, 
 
 Profiles support avatars and banners stored in PostgreSQL, favorite disciplines, cosmetic frames, seasonal ratings, rank history recorded from new ranked results and head-to-head rivalries. Uploaded images are resized by the client and validated by signature and size on the server (PNG/JPEG/WebP only, 80 KiB avatar and 200 KiB banner). No external upload service is required. Weekly goals reset Monday at 00:00 UTC and award 150 XP each once. Cosmetic frames unlock at level 3 or Silver; they never affect gameplay.
 
-Parties have two seats because the existing games are 1v1. An online host invites a friend, selects a discipline and match length, and launches only after both players are ready. Changing rules, reconnecting or entering a match clears readiness. Party membership persists across restarts. Invitations expire after 90 seconds; duplicates, full rooms, non-host edits and unavailable players are rejected. Removing or blocking a friend closes their shared party. Party matches reuse the existing private match engine and rematch flow. Tournament participants can invite friends to open four-player brackets; accepting an invitation registers the recipient with capacity and friendship checks.
+Parties now support eight participants: exactly two active player seats and up to six spectator seats, because the existing games remain 1v1. An online host invites a friend, selects a discipline and match length, and launches only after both players are ready. Changing rules, reconnecting or entering a match clears readiness. Party membership persists across restarts. Invitations expire after 90 seconds; duplicates, full rooms, non-host edits and unavailable players are rejected. Removing or blocking a friend closes their shared party. Party matches reuse the existing private match engine and rematch flow. Tournament participants can invite friends to open four- or eight-player brackets; accepting an invitation registers the recipient with capacity and friendship checks.
 
 ### Private report review
 
@@ -225,10 +225,15 @@ npm run reports -- resolve <report-id>
 
 ## Visual identity and gameplay previews
 
-The interface uses self-hosted Manrope (SIL Open Font License in `public/fonts`), a custom split DuelZone mark, graphite surfaces and a restrained lime accent. `app/identity.css` owns the shared presentation and responsive rules; the existing game CSS continues to define gameplay geometry. The public service, backend, authentication and PostgreSQL schema are unchanged by this release.
+The interface uses self-hosted Manrope (SIL Open Font License in `public/fonts`), a custom split DuelZone mark, graphite surfaces and a restrained lime accent. `app/identity.css` owns the shared presentation and responsive rules; the existing game CSS continues to define gameplay geometry. The existing public URL, authentication and saved records are preserved. DuelZone 2.0 adds the backward-compatible tables documented in `EVOLUTION.md`.
 
 The homepage showcase and library use local canvas previews. The six physics games reuse the production renderer, simulation and bot drivers. Competition previews take their positions, targets, tiles and puzzles from the existing simulation; the four original timing games show their actual interaction patterns. These are explicitly labelled previews, never reported as live human matches, and do not open sockets or write statistics. Animation runs at up to 30 frames per second only for the showcase or a hovered/focused card, pauses offscreen/in hidden tabs or behind dialogs, and respects reduced motion. Pause and game-switch controls are keyboard accessible.
 
 The library launches the selected ranked/casual game directly and carries its game choice into the friends challenge form. Daily and weekly progression remain on Home and Profile. The Friends control moves into the match header while playing so that it cannot cover the arena or ability controls.
 
 Visual validation uses real local QA accounts on the isolated development database. Desktop and 390px mobile screenshots cover the dashboard/library, queue cancellation, profile, social panel, notifications, settings, tournaments, AI match HUD and results. No public sample players or statistics are added for presentation.
+
+
+## DuelZone 2.0
+
+See [EVOLUTION.md](EVOLUTION.md) for the baseline audit, implementation checklist, additive migration inventory, measured performance, test evidence, privacy/retention limits and rollback steps. Daily Duel, Showdown Draft, expanded lobbies, per-game mastery, training, supported replays/ghost races and feedback reuse the existing API, account and authoritative match pipeline. Run `npm run test:evolution` for the cross-feature integration boundaries. The production address remains https://duelzone-nicklas.onrender.com/.

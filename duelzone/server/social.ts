@@ -35,6 +35,8 @@ const rulesSchema = z.object({
   spectators: z.boolean(),
 });
 const privacySchema = z.object({
+  activity: z.boolean().default(false),
+  replays: z.boolean().default(false),
   requests: z.boolean(),
   messages: z.boolean(),
   challenges: z.boolean(),
@@ -259,7 +261,7 @@ export class Social {
         } else socket?.volatile.emit("spectate", state);
       }
   }
-  private stopWatching(ids: string[]) {
+  stopWatching(ids: string[]) {
     for (const [viewer, mid] of this.watching) {
       const match = this.runtime.matches.get(mid);
       if (
@@ -657,7 +659,14 @@ export class Social {
     });
     event("social:watch", async (data) => {
       const { target } = targetSchema.parse(data);
-      await this.assertFriend(id, target);
+      const inLobby =
+        (
+          await this.db.query(
+            "SELECT 1 FROM party_members a JOIN party_members b ON a.party_id=b.party_id WHERE a.user_id=$1 AND b.user_id=$2 AND a.role='spectator' AND b.role='player'",
+            [id, target],
+          )
+        ).rows.length > 0;
+      if (!inLobby) await this.assertFriend(id, target);
       if (!this.runtime.available(id))
         throw Error("Leave your match or queue before watching.");
       const match = this.runtime.matches.get(

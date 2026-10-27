@@ -305,7 +305,9 @@ export function Dashboard({
                   <b>{t.name}</b>
                   <small>{GAME_INFO[t.game].name}</small>
                 </span>
-                <small>{t.entrants.length}/4 registered</small>
+                <small>
+                  {t.entrants.length}/{t.capacity} registered
+                </small>
               </button>
             ))}
           {!tournaments.some((t) => t.status === "open") && (

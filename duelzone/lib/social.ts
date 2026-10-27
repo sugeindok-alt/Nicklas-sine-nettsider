@@ -1,6 +1,7 @@
 import type { Game, Player } from "./shared";
 
 export type MatchRules = {
+  draft?: boolean;
   length: "quick" | "standard" | "extended";
   spectators: boolean;
 };
@@ -19,6 +20,8 @@ export const watchableGames: readonly Game[] = [
   "core",
 ];
 export type Privacy = {
+  activity: boolean;
+  replays: boolean;
   requests: boolean;
   messages: boolean;
   challenges: boolean;
@@ -26,6 +29,8 @@ export type Privacy = {
   spectators: boolean;
 };
 export const defaultPrivacy: Privacy = {
+  activity: false,
+  replays: false,
   requests: true,
   messages: true,
   challenges: true,

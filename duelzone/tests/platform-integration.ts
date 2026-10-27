@@ -250,7 +250,16 @@ try {
     accept: true,
   });
   await command(b, "party:respond", { inviteId: partyInvite.id, accept: true });
-  await rejected(a, "party:invite", { target: c.user.id });
+  await command(a, "party:invite", { target: c.user.id });
+  const spectatorInvite = (await platform(c)).invitations[0];
+  await command(c, "party:respond", {
+    inviteId: spectatorInvite.id,
+    accept: true,
+  });
+  assert.equal(
+    (await platform(c)).party.members.find((m: any) => m.id === c.user.id).role,
+    "spectator",
+  );
   await rejected(b, "party:configure", {
     game: "core",
     rules: { length: "quick", spectators: false },
@@ -331,7 +340,12 @@ try {
   await start();
   await connect(a);
   await connect(b);
-  assert.equal((await platform(a)).party.members.length, 2);
+  assert.equal((await platform(a)).party.members.length, 3);
+  assert.equal(
+    (await platform(a)).party.members.filter((m: any) => m.role === "spectator")
+      .length,
+    1,
+  );
   assert((await platform(a)).party.members.every((m: any) => !m.ready));
   await command(a, "social:block", { target: b.user.id, blocked: true });
   assert.equal((await platform(a)).party, null);

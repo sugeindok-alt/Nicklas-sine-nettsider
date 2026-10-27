@@ -12,7 +12,14 @@ import {
 } from "../lib/shared";
 import { awardProgress, getProgress } from "./progression";
 import { platformSchema, putNotification } from "./platform";
+import { replaySchema } from "./replays";
 import { socialSchema } from "./social";
+import {
+  evolutionSchema,
+  awardMastery,
+  masteryProfile,
+  recordActivity,
+} from "./evolution-data";
 
 export interface SQL {
   query<T = Record<string, unknown>>(
@@ -107,6 +114,10 @@ export class Database implements SQL {
     await this.query(
       "ALTER TABLE matches ADD COLUMN IF NOT EXISTS details JSONB",
     );
+    for (const statement of evolutionSchema.split(";").filter((s) => s.trim()))
+      await this.query(statement);
+    for (const statement of replaySchema.split(";").filter((s) => s.trim()))
+      await this.query(statement);
     await this.currentSeason();
     await this.query(
       "UPDATE matches SET status='abandoned',reason='Server restarted; no rating change',ended_at=now() WHERE status='active'",
@@ -127,7 +138,7 @@ export class Database implements SQL {
   async player(id: string): Promise<Player | undefined> {
     return (
       await this.query<Player>(
-        "SELECT id,username,accent,bio,cosmetic,CASE WHEN avatar<>'' THEN '/api/media/'||id||'/avatar?v='||media_version ELSE '' END AS avatar,CASE WHEN banner<>'' THEN '/api/media/'||id||'/banner?v='||media_version ELSE '' END AS banner FROM users WHERE id=$1",
+        "SELECT id,username,accent,bio,cosmetic,mastery_badge,CASE WHEN avatar<>'' THEN '/api/media/'||id||'/avatar?v='||media_version ELSE '' END AS avatar,CASE WHEN banner<>'' THEN '/api/media/'||id||'/banner?v='||media_version ELSE '' END AS banner FROM users WHERE id=$1",
         [id],
       )
     ).rows[0];
@@ -234,6 +245,8 @@ export class Database implements SQL {
           [state.scores[p.id], changes[p.id] || 0, state.id, p.id],
         );
       state.rewards = await awardProgress(tx, state);
+      await awardMastery(tx, state);
+      await recordActivity(tx, state);
       return changes;
     });
   }
@@ -249,7 +262,7 @@ export class Database implements SQL {
     ).rows[0] || { rating: 1000, games: 0, wins: 0 };
     const history = (
       await this.query(
-        `SELECT m.id,m.game,m.mode,m.status,m.winner_id,m.reason,m.ended_at,m.details,r.score,r.rating_change,u.username AS opponent,u.id AS opponent_id,other.score AS opponent_score FROM results r JOIN matches m ON m.id=r.match_id JOIN results other ON other.match_id=m.id AND other.user_id<>r.user_id JOIN users u ON u.id=other.user_id WHERE r.user_id=$1 AND m.status<>'active' ORDER BY m.ended_at DESC LIMIT 50`,
+        `SELECT EXISTS(SELECT 1 FROM match_replays mr WHERE mr.match_id=m.id) AS replay,m.id,m.game,m.mode,m.status,m.winner_id,m.reason,m.ended_at,m.details,r.score,r.rating_change,u.username AS opponent,u.id AS opponent_id,other.score AS opponent_score FROM results r JOIN matches m ON m.id=r.match_id JOIN results other ON other.match_id=m.id AND other.user_id<>r.user_id JOIN users u ON u.id=other.user_id WHERE r.user_id=$1 AND m.status<>'active' ORDER BY m.ended_at DESC LIMIT 50`,
         [id],
       )
     ).rows;
@@ -272,6 +285,7 @@ export class Database implements SQL {
       stats,
       records,
       progression: await getProgress(this, id),
+      mastery: await masteryProfile(this, id),
       favorites:
         (
           await this.query<{ preferences: { favorites: string[] } }>(
@@ -299,29 +313,30 @@ export class Database implements SQL {
       ).rows,
     };
   }
-  async tournaments() {
+  async tournaments(viewer = "") {
     const list = (
       await this.query(
-        "SELECT t.*,u.username AS host,w.username AS winner FROM tournaments t JOIN users u ON u.id=t.host_id LEFT JOIN users w ON w.id=t.winner_id ORDER BY t.created_at DESC LIMIT 30",
+        "SELECT t.*,u.username AS host,w.username AS winner FROM tournaments t JOIN users u ON u.id=t.host_id LEFT JOIN users w ON w.id=t.winner_id WHERE NOT t.private OR t.host_id=$1 OR EXISTS(SELECT 1 FROM entrants e WHERE e.tournament_id=t.id AND e.user_id=$1) OR EXISTS(SELECT 1 FROM tournament_invites i WHERE i.tournament_id=t.id AND i.to_id=$1 AND i.status='pending' AND i.expires_at>now()) ORDER BY t.created_at DESC LIMIT 30",
+        [viewer],
       )
     ).rows;
-    return Promise.all(
-      list.map(async (t) => ({
-        ...t,
-        entrants: (
-          await this.query(
-            "SELECT u.id,u.username,u.accent FROM entrants e JOIN users u ON u.id=e.user_id WHERE tournament_id=$1 ORDER BY joined_at",
-            [t.id],
-          )
-        ).rows,
-        fixtures: (
-          await this.query(
-            "SELECT f.*,a.username AS name_a,b.username AS name_b,w.username AS winner FROM fixtures f JOIN users a ON a.id=f.player_a JOIN users b ON b.id=f.player_b LEFT JOIN users w ON w.id=f.winner_id WHERE tournament_id=$1 ORDER BY round,slot",
-            [t.id],
-          )
-        ).rows,
-      })),
-    );
+    if (!list.length) return [];
+    const ids = list.map((t) => t.id);
+    const [entrants, fixtures] = await Promise.all([
+      this.query(
+        "SELECT e.tournament_id,u.id,u.username,u.accent,e.ready FROM entrants e JOIN users u ON u.id=e.user_id WHERE e.tournament_id=ANY($1::text[]) ORDER BY e.joined_at",
+        [ids],
+      ),
+      this.query(
+        "SELECT f.*,a.username AS name_a,b.username AS name_b,w.username AS winner,ra.score AS score_a,rb.score AS score_b FROM fixtures f JOIN users a ON a.id=f.player_a JOIN users b ON b.id=f.player_b LEFT JOIN users w ON w.id=f.winner_id LEFT JOIN results ra ON ra.match_id=f.match_id AND ra.user_id=f.player_a LEFT JOIN results rb ON rb.match_id=f.match_id AND rb.user_id=f.player_b WHERE f.tournament_id=ANY($1::text[]) ORDER BY round,slot",
+        [ids],
+      ),
+    ]);
+    return list.map((t) => ({
+      ...t,
+      entrants: entrants.rows.filter((e) => e.tournament_id === t.id),
+      fixtures: fixtures.rows.filter((f) => f.tournament_id === t.id),
+    }));
   }
 }
 export const newId = () => randomUUID();

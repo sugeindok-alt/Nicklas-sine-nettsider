@@ -41,7 +41,7 @@ import {
   type MatchState,
   type Player,
 } from "@/lib/shared";
-import { matchFeed, network } from "@/lib/match-feed";
+import { matchFeed, network, recordProbe } from "@/lib/match-feed";
 import { api } from "@/lib/client";
 import { gameIcons } from "./game-art";
 import Modal from "./modal";
@@ -70,6 +70,20 @@ import { defaultPreferences } from "@/lib/platform";
 import { NotificationCenter, usePlatform } from "./platform-center";
 import type { SocialState } from "@/lib/social";
 import { SocialPanel } from "./social-panel";
+import { DailyHub, DailyArena } from "./daily-duel";
+import type { DailyRun } from "@/lib/daily";
+import type { DraftState } from "@/lib/draft";
+import { ShowdownDraft } from "./showdown-draft";
+import { ReplayViewer, GhostLibrary } from "./replay-viewer";
+import {
+  FeedbackButton,
+  FriendsActivity,
+  UpdateHistory,
+} from "./community-tools";
+import { Installable } from "./installable";
+import { PerformancePanel, PerformanceSettings } from "./performance-panel";
+import { TrainingHub } from "./training-hub";
+import { MasteryPanel, MasteryWorkshop, type Mastery } from "./mastery";
 
 type View =
   | "dashboard"
@@ -78,7 +92,9 @@ type View =
   | "tournaments"
   | "profile"
   | "history"
-  | "settings";
+  | "settings"
+  | "daily"
+  | "training";
 type Pending =
   | { game: Game | "any"; mode: "ranked" | "casual" | "friend" }
   | { ai: Game; difficulty: Difficulty }
@@ -92,6 +108,7 @@ type Overview = {
 };
 type BoardRow = Player & { rating: number; games: number; wins: number };
 export type Profile = {
+  mastery?: Mastery[];
   favorites?: Game[];
   rankHistory?: { rating: number; season_id: string; created_at: string }[];
   seasons?: {
@@ -126,9 +143,12 @@ export type Profile = {
     opponent_score: number;
     details?: import("@/lib/frontier").RoundRecord[];
     rating_change: number;
+    replay?: boolean;
   }[];
 };
 export type Tournament = {
+  capacity: 4 | 8;
+  private: boolean;
   id: string;
   name: string;
   game: Game;
@@ -136,10 +156,12 @@ export type Tournament = {
   host: string;
   status: string;
   winner: string | null;
-  entrants: Player[];
+  entrants: (Player & { ready: boolean })[];
   fixtures: {
     round: number;
     slot: number;
+    score_a: number;
+    score_b: number;
     name_a: string;
     name_b: string;
     winner: string | null;
@@ -148,6 +170,8 @@ export type Tournament = {
 const nav = [
   { id: "dashboard", label: "Home", icon: Activity },
   { id: "arena", label: "Game library", icon: Gamepad2 },
+  { id: "daily", label: "Daily Duel", icon: Activity },
+  { id: "training", label: "Training", icon: Shield },
   { id: "leaderboard", label: "Leaderboard", icon: Trophy },
   { id: "tournaments", label: "Tournaments", icon: Swords },
   { id: "profile", label: "Your profile", icon: User },
@@ -181,10 +205,18 @@ export default function DuelZone() {
     [help, setHelp] = useState(false),
     [createTournament, setCreateTournament] = useState(false);
   const [aiPicker, setAiPicker] = useState(false);
+  const [replay, setReplay] = useState<{
+    id: string;
+    share?: string;
+    at?: number;
+  } | null>(null);
+  const [dailyRun, setDailyRun] = useState<DailyRun | null>(null);
+  const [draft, setDraft] = useState<DraftState | null>(null);
   const [queue, setQueue] = useState<{
       game: Game | "any";
       at: number;
       invite?: string;
+      estimate?: { seconds: number; searches: number };
     } | null>(null),
     [match, setMatch] = useState<MatchState | null>(null),
     [pending, setPending] = useState<Pending | null>(null);
@@ -220,6 +252,8 @@ export default function DuelZone() {
           "profile",
           "history",
           "settings",
+          "daily",
+          "training",
         ].includes(next)
       )
         setView(next as View);
@@ -232,6 +266,13 @@ export default function DuelZone() {
       setProfileId(sharedPlayer);
       setView("profile");
     }
+    const replayId = parameters.get("replay");
+    if (replayId && /^[a-f0-9-]{36}$/.test(replayId))
+      setReplay({
+        id: replayId,
+        share: parameters.get("share") || undefined,
+        at: Math.max(0, Math.min(150000, Number(parameters.get("at")) || 0)),
+      });
     const invite = parameters.get("invite");
     if (invite) {
       setPending({ invite });
@@ -305,7 +346,7 @@ export default function DuelZone() {
       const at = performance.now();
       if (s.connected)
         s.timeout(1500).volatile.emit("clock", (error: Error | null) => {
-          if (!error) network.rtt = performance.now() - at;
+          recordProbe(error ? null : performance.now() - at);
         });
     };
     const pingTimer = setInterval(ping, 4000);
@@ -314,6 +355,18 @@ export default function DuelZone() {
       ping();
     });
     s.on("frame", matchFeed.frame);
+    s.on("daily:state", (state: DailyRun | null) => {
+      setDailyRun(state?.status === "cancelled" ? null : state);
+      if (state?.status === "finished") setTick((t) => t + 1);
+    });
+    s.on("draft", (state: DraftState | null) => {
+      setDraft(state);
+      if (state) {
+        setQueue(null);
+        setMatch(null);
+        setPractice(null);
+      }
+    });
     s.on("disconnect", () => {
       setConnected(false);
       if (queueRef.current)
@@ -329,6 +382,9 @@ export default function DuelZone() {
     });
     s.on("match", (state: MatchState) => {
       if (!state) return;
+      setPractice(null);
+      setReplay(null);
+      setAiPicker(false);
       matchFeed.publish(state);
       setMatch(state);
       setQueue(null);
@@ -401,7 +457,10 @@ export default function DuelZone() {
           });
         } else {
           setQueue({ game: action.game, at: Date.now() });
-          await command("queue:join", action);
+          const result = await command("queue:join", action);
+          setQueue((q) =>
+            q ? { ...q, estimate: result.estimate || undefined } : null,
+          );
         }
       } catch (e) {
         setQueue(null);
@@ -500,6 +559,8 @@ export default function DuelZone() {
     profile: "Player profile",
     history: "Match history",
     settings: "Account settings",
+    daily: "Daily Duel",
+    training: "Training hub",
   }[view];
   function gate() {
     return (
@@ -802,6 +863,49 @@ export default function DuelZone() {
                 exit={{ opacity: 0, y: -5 }}
                 transition={{ duration: 0.22 }}
               >
+                {view === "training" &&
+                  (user ? (
+                    <>
+                      <TrainingHub
+                        revision={tick}
+                        connected={connected}
+                        play={(ai, difficulty) =>
+                          void begin({ ai, difficulty })
+                        }
+                      />
+                      <GhostLibrary
+                        revision={tick}
+                        command={command}
+                        onReplay={(id) => setReplay({ id })}
+                      />
+                    </>
+                  ) : (
+                    gate()
+                  ))}
+                {view === "daily" && (
+                  <DailyHub
+                    signedIn={!!user}
+                    connected={connected}
+                    command={command}
+                    signIn={() => setAuth("register")}
+                    revision={tick}
+                  />
+                )}
+                {view === "dashboard" && (
+                  <button
+                    className="evolution-entry"
+                    onClick={() => navigate("daily")}
+                  >
+                    <div>
+                      <span className="eyebrow">
+                        DAILY DUEL / A FRESH CIRCUIT EVERY DAY
+                      </span>
+                      <strong>Set today’s mark.</strong>
+                      <p>Thirty seconds. The same challenge for everyone.</p>
+                    </div>
+                    <ArrowRight size={24} />
+                  </button>
+                )}
                 {view === "dashboard" &&
                   (ownProfile ? (
                     <Dashboard
@@ -822,6 +926,9 @@ export default function DuelZone() {
                   ) : (
                     gate()
                   ))}
+                {view === "dashboard" && user && (
+                  <FriendsActivity revision={tick} onProfile={showProfile} />
+                )}
                 {view === "arena" && (
                   <>
                     <ArenaShowcase
@@ -842,11 +949,11 @@ export default function DuelZone() {
                       </div>
                       <div>
                         <span className="eyebrow">The signature series</span>
-                        <h2>Five games. One champion.</h2>
+                        <h2>Your series. Your advantage.</h2>
                         <p>
-                          One rival. Five disciplines. A new draw every series.
-                          Win three rounds across combat, movement, sport and
-                          tactics to take the match.
+                          Five disciplines in the pool. Pick and ban for a
+                          ranked best-of-three, or play a random best-of-five in
+                          casual. One rival. Every round matters.
                         </p>
                       </div>
                       <div>
@@ -1097,8 +1204,8 @@ export default function DuelZone() {
                   <>
                     <PageHeading
                       eyebrow="Tournaments"
-                      title="Four players. One champion."
-                      description="Create a four-player knockout, gather your rivals and settle it in the arena."
+                      title="Your rivals. One champion."
+                      description="Four or eight players. Private invitations or an open bracket. Ready up, compete and take the title."
                       action={
                         <button
                           className="button primary"
@@ -1124,11 +1231,11 @@ export default function DuelZone() {
                         <span>IV</span>
                       </div>
                       <span>
-                        01 <b>Gather your four</b>
+                        01 <b>Gather your rivals</b>
                       </span>
                       <ArrowRight size={18} />
                       <span>
-                        02 <b>Win the semifinals</b>
+                        02 <b>Win your bracket</b>
                       </span>
                       <ArrowRight size={18} />
                       <span>
@@ -1149,10 +1256,15 @@ export default function DuelZone() {
                             </div>
                             <h2>{t.name}</h2>
                             <p className="muted small">
-                              Hosted by {t.host} · {t.entrants.length}/4 players
+                              Hosted by {t.host} · {t.entrants.length}/
+                              {t.capacity} players ·{" "}
+                              {t.private ? "Private" : "Open"}
                             </p>
                             <div className="entrant-list">
-                              {[0, 1, 2, 3].map((i) => (
+                              {Array.from(
+                                { length: t.capacity },
+                                (_, i) => i,
+                              ).map((i) => (
                                 <div key={i}>
                                   <span
                                     className="avatar small-avatar"
@@ -1164,6 +1276,10 @@ export default function DuelZone() {
                                   </span>
                                   <span>
                                     {t.entrants[i]?.username || "Open slot"}
+                                    {t.status === "open" &&
+                                      t.entrants[i]?.ready && (
+                                        <Check size={12} />
+                                      )}
                                   </span>
                                 </div>
                               ))}
@@ -1173,16 +1289,18 @@ export default function DuelZone() {
                                 {t.fixtures.map((f) => (
                                   <div key={`${f.round}-${f.slot}`}>
                                     <span>
-                                      {f.round === 1
-                                        ? `SEMIFINAL ${f.slot + 1}`
-                                        : "FINAL"}
+                                      {f.round === Math.log2(t.capacity)
+                                        ? "FINAL"
+                                        : f.round === Math.log2(t.capacity) - 1
+                                          ? `SEMIFINAL ${f.slot + 1}`
+                                          : `QUARTERFINAL ${f.slot + 1}`}
                                     </span>
                                     <b>
                                       {f.name_a} <small>vs</small> {f.name_b}
                                     </b>
                                     <em>
                                       {f.winner
-                                        ? `${f.winner} advances`
+                                        ? `${f.winner} advances · ${f.score_a ?? 0}–${f.score_b ?? 0}`
                                         : "In progress"}
                                     </em>
                                   </div>
@@ -1196,7 +1314,7 @@ export default function DuelZone() {
                               </div>
                             )}
                             {t.status === "open" &&
-                              t.entrants.length < 4 &&
+                              t.entrants.length < t.capacity &&
                               t.entrants.some((p) => p.id === user?.id) && (
                                 <TournamentInviteButton
                                   tournament={t}
@@ -1213,12 +1331,30 @@ export default function DuelZone() {
                                       <Check size={14} />
                                       You’re in
                                     </span>
+                                    <button
+                                      className="button secondary compact"
+                                      disabled={busy || !connected}
+                                      onClick={() =>
+                                        void command("tournament:ready", {
+                                          id: t.id,
+                                          ready: !t.entrants.find(
+                                            (p) => p.id === user?.id,
+                                          )?.ready,
+                                        }).catch((e) => notify(e.message))
+                                      }
+                                    >
+                                      {t.entrants.find((p) => p.id === user?.id)
+                                        ?.ready
+                                        ? "Not ready"
+                                        : "Ready up"}
+                                    </button>
                                     {t.host_id === user?.id && (
                                       <button
                                         className="button primary compact"
                                         disabled={
                                           busy ||
-                                          t.entrants.length !== 4 ||
+                                          t.entrants.length !== t.capacity ||
+                                          !t.entrants.every((p) => p.ready) ||
                                           !connected
                                         }
                                         onClick={() =>
@@ -1243,7 +1379,9 @@ export default function DuelZone() {
                                 ) : (
                                   <button
                                     className="button secondary"
-                                    disabled={busy || t.entrants.length === 4}
+                                    disabled={
+                                      busy || t.entrants.length === t.capacity
+                                    }
                                     onClick={() =>
                                       void tournamentAction(t.id, "join")
                                     }
@@ -1262,7 +1400,7 @@ export default function DuelZone() {
                         <Swords size={40} />
                         <h2>Make the first move.</h2>
                         <p>
-                          No tournaments yet. Create one and bring three rivals.
+                          No tournaments yet. Create one and invite your rivals.
                           <br />
                           All players must be signed in and online when the host
                           starts.
@@ -1360,6 +1498,7 @@ export default function DuelZone() {
                           onProfile={showProfile}
                           notify={notify}
                         />
+                        <MasteryPanel rows={profile.mastery || []} />
                         {profile.progression && (
                           <ProgressionPanel progress={profile.progression} />
                         )}
@@ -1440,7 +1579,10 @@ export default function DuelZone() {
                     {!user ? (
                       gate()
                     ) : ownProfile ? (
-                      <HistoryTable profile={ownProfile} />
+                      <HistoryTable
+                        profile={ownProfile}
+                        onReplay={(id) => setReplay({ id })}
+                      />
                     ) : (
                       <Loading />
                     )}
@@ -1465,6 +1607,19 @@ export default function DuelZone() {
                             setTick((t) => t + 1);
                           }}
                           notify={notify}
+                        />
+                        <div className="training-options">
+                          <FeedbackButton />
+                          <UpdateHistory />
+                        </div>
+                        <PerformanceSettings />
+                        <MasteryWorkshop
+                          user={user}
+                          rows={ownProfile?.mastery || []}
+                          onSave={(p) => {
+                            setUser(p);
+                            setTick((t) => t + 1);
+                          }}
                         />
                         <SettingsForm
                           user={user}
@@ -1590,7 +1745,7 @@ export default function DuelZone() {
             />
           </Modal>
         )}
-        {queue && !match && (
+        {queue && !match && !draft && (
           <Modal
             title={
               queue.invite
@@ -1660,6 +1815,18 @@ export default function DuelZone() {
                 </>
               ) : (
                 <>
+                  {queue.estimate && (
+                    <p className="small muted">
+                      Recent median wait: ~{queue.estimate.seconds}s ·{" "}
+                      {queue.estimate.searches} real searches in the last 15
+                      minutes. Your wait may differ.
+                    </p>
+                  )}
+                  {queue.game === "showdown" && mode === "ranked" && (
+                    <p className="small accent">
+                      Ranked Showdown starts with a pick-and-ban draft.
+                    </p>
+                  )}
                   <div className="queue-time">
                     {String(
                       Math.floor(Math.max(0, now - queue.at) / 60000),
@@ -1686,6 +1853,14 @@ export default function DuelZone() {
                   </button>
                 </>
               )}
+              {!queue.invite && (
+                <button
+                  className="button secondary compact"
+                  onClick={() => setPractice("precision")}
+                >
+                  Warm up while searching <ArrowRight size={14} />
+                </button>
+              )}
               <button
                 className="text-button muted"
                 onClick={() => void leaveQueue()}
@@ -1694,6 +1869,30 @@ export default function DuelZone() {
               </button>
             </div>
           </Modal>
+        )}
+        {replay && (
+          <ReplayViewer
+            id={replay.id}
+            share={replay.share}
+            startAt={replay.at}
+            onClose={() => setReplay(null)}
+          />
+        )}
+        {dailyRun && user && (
+          <DailyArena
+            key={dailyRun.id}
+            run={dailyRun}
+            socket={socket.current}
+            command={command}
+            onClose={() => {
+              setDailyRun(null);
+              navigate("daily");
+              setTick((t) => t + 1);
+            }}
+          />
+        )}
+        {draft && user && (
+          <ShowdownDraft state={draft} userId={user.id} command={command} />
         )}
         {match && user && (
           <Arena
@@ -1744,6 +1943,15 @@ export default function DuelZone() {
             matchId={match?.phase !== "finished" ? match?.id : undefined}
           />
         )}
+        <Installable
+          busy={
+            !!queue ||
+            !!draft ||
+            dailyRun?.status === "active" ||
+            (!!match && match.phase !== "finished")
+          }
+        />
+        <PerformancePanel connected={connected} />
         <AnimatePresence>
           {toast && (
             <motion.div
@@ -1921,10 +2129,13 @@ function TournamentForm({ onSuccess }: { onSuccess: () => void }) {
         setBusy(true);
         setError("");
         try {
-          await api(
-            "/tournaments",
-            Object.fromEntries(new FormData(e.currentTarget)),
-          );
+          const data = new FormData(e.currentTarget);
+          await api("/tournaments", {
+            name: data.get("name"),
+            game: data.get("game"),
+            capacity: Number(data.get("capacity")),
+            private: data.get("private") === "on",
+          });
           onSuccess();
         } catch (e) {
           setError((e as Error).message);
@@ -1934,7 +2145,7 @@ function TournamentForm({ onSuccess }: { onSuccess: () => void }) {
       }}
     >
       <p className="modal-description">
-        Four players. Two semifinals. One final. You join automatically as the
+        Choose a four- or eight-player knockout. You join automatically as the
         host.
       </p>
       <label>
@@ -1957,6 +2168,17 @@ function TournamentForm({ onSuccess }: { onSuccess: () => void }) {
           ))}
         </select>
       </label>
+      <label>
+        Bracket size
+        <select name="capacity">
+          <option value="4">4 players</option>
+          <option value="8">8 players</option>
+        </select>
+      </label>
+      <label className="party-spectators">
+        <input name="private" type="checkbox" />
+        Private friend tournament
+      </label>
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -1965,8 +2187,9 @@ function TournamentForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="info-note">
         <Users size={20} />
         <p>
-          Ask three friends to open DuelZone and join from Tournaments. All four
-          players must be online to start.
+          Every entrant must be online and ready before the host can start.
+          Private tournaments appear only to their host, entrants and invited
+          friends.
         </p>
       </div>
       <button className="button primary" disabled={busy}>
@@ -1976,7 +2199,13 @@ function TournamentForm({ onSuccess }: { onSuccess: () => void }) {
     </form>
   );
 }
-function HistoryTable({ profile }: { profile: Profile }) {
+function HistoryTable({
+  profile,
+  onReplay,
+}: {
+  profile: Profile;
+  onReplay?: (id: string) => void;
+}) {
   return (
     <section className="panel full history-panel">
       <div className="panel-heading">
@@ -2018,6 +2247,15 @@ function HistoryTable({ profile }: { profile: Profile }) {
                   <td>
                     {GAME_INFO[m.game].name}
                     <small className="table-sub">{m.mode}</small>
+                    {m.replay && onReplay && (
+                      <button
+                        className="text-button small"
+                        onClick={() => onReplay(m.id)}
+                      >
+                        Watch replay
+                        <ArrowRight size={12} />
+                      </button>
+                    )}
                     {m.game === "showdown" && m.details?.length ? (
                       <details className="history-series">
                         <summary>Round breakdown</summary>

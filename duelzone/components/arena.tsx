@@ -1,6 +1,7 @@
 "use client";
 import { FrontierField, FrontierPractice, SeriesRecap } from "./frontier-field";
 import { isFrontier } from "@/lib/frontier";
+import { FeedbackButton } from "./community-tools";
 import { Brand } from "./brand";
 import { MatchIntro } from "./match-intro";
 import { AnimatedNumber } from "./animated-number";
@@ -311,7 +312,11 @@ function Arena({
       role="dialog"
       aria-modal="true"
       aria-label={
-        state.mode === "ai" ? "AI practice match" : "Live multiplayer match"
+        state.mode === "ai"
+          ? "AI practice match"
+          : state.mode === "ghost"
+            ? "Recorded ghost challenge"
+            : "Live multiplayer match"
       }
     >
       <div className="arena-wrap">
@@ -322,7 +327,11 @@ function Arena({
             <span className="muted">{GAME_INFO[state.game].name}</span>
           </div>
           <span className="mode-chip">
-            {state.mode === "ai" ? "AI PRACTICE · BOT" : state.mode}
+            {state.mode === "ai"
+              ? "AI PRACTICE · BOT"
+              : state.mode === "ghost"
+                ? "RECORDED GHOST · TRAINING"
+                : state.mode}
           </span>
           <div id="arena-social-anchor" />
           <button
@@ -415,6 +424,10 @@ function Arena({
           {finished ? (
             <motion.div
               className={`match-results ${won ? "victory" : tie ? "draw" : "defeat"}`}
+              data-finish={
+                state.players.find((p) => p.id === userId)?.cosmetic ||
+                "graphite"
+              }
               key="results"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -437,7 +450,11 @@ function Arena({
                 </div>
               )}
               <span className="eyebrow">
-                {state.reason === "Score" ? "MATCH COMPLETE" : state.reason}
+                {state.reason === "Score"
+                  ? "MATCH COMPLETE"
+                  : state.reason === "Opponent left the match" && !won
+                    ? "You left the match"
+                    : state.reason}
               </span>
               <h1>{tie ? "A draw." : won ? "Victory." : "Defeat."}</h1>
               <p>
@@ -475,6 +492,7 @@ function Arena({
               {state.frontier && (
                 <SeriesRecap view={state.frontier} players={state.players} />
               )}
+              <FeedbackButton match={state} />
               <div className="result-actions">
                 {state.mode !== "tournament" && (
                   <button
@@ -502,9 +520,11 @@ function Arena({
               )}
               <div className="saved-note">
                 <Check size={14} />
-                {state.mode === "ai"
-                  ? "AI practice · no ranked points or profile rewards"
-                  : "Result saved to your profile"}
+                {state.mode === "ghost"
+                  ? "Ghost training saved · no ranked points or mastery rewards"
+                  : state.mode === "ai"
+                    ? "AI training saved · no ranked points or mastery rewards"
+                    : "Result saved to your profile"}
               </div>
             </motion.div>
           ) : state.phase === "intro" ? (

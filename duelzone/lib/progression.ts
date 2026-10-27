@@ -1,6 +1,42 @@
 import { featuredGames, GAME_INFO, type Game } from "./shared";
 export const ACHIEVEMENTS = [
   {
+    id: "first-ranked",
+    name: "On the board",
+    description: "Win your first completed ranked match.",
+    title: "Ranked challenger",
+  },
+  {
+    id: "game-ten",
+    name: "Know your game",
+    description: "Win ten completed matches in one discipline.",
+    title: "Specialist",
+  },
+  {
+    id: "personal-best",
+    name: "Raise the bar",
+    description: "Beat an existing multiplayer personal record.",
+    title: "Pacesetter",
+  },
+  {
+    id: "clean-sweep",
+    name: "No reply",
+    description: "Win a Showdown series without dropping a round.",
+    title: "Series closer",
+  },
+  {
+    id: "tournament-win",
+    name: "Top of the bracket",
+    description: "Win a four- or eight-player tournament.",
+    title: "Tournament winner",
+  },
+  {
+    id: "daily-focus",
+    name: "Daily discipline",
+    description: "Score at least 2,700 in a completed Daily Duel.",
+    title: "Focus specialist",
+  },
+  {
     id: "first-win",
     name: "First blood",
     description: "Win a completed duel.",

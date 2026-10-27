@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS tournament_invites(id TEXT PRIMARY KEY,tournament_id 
 CREATE UNIQUE INDEX IF NOT EXISTS tournament_invite_pair ON tournament_invites(tournament_id,to_id) WHERE status='pending';
 CREATE TABLE IF NOT EXISTS player_reports(id TEXT PRIMARY KEY,reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,target_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,message_id TEXT REFERENCES private_messages(id) ON DELETE SET NULL,reason TEXT NOT NULL,details TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'open',created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE UNIQUE INDEX IF NOT EXISTS report_duplicate ON player_reports(reporter_id,target_id,reason) WHERE status='open';
+ALTER TABLE party_members ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'player';
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS match_id TEXT;
+CREATE TABLE IF NOT EXISTS party_messages(id TEXT PRIMARY KEY,party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,body TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS party_messages_room ON party_messages(party_id,created_at DESC);
 UPDATE party_members SET ready=false;
 `;
 type Event = (name: string, fn: (data: unknown) => Promise<unknown>) => void;
@@ -32,9 +36,12 @@ export type PartyRuntime = {
   available: (id: string) => boolean;
   friend: (a: string, b: string, sql?: SQL) => Promise<void>;
   settings: (id: string, sql?: SQL) => Promise<Privacy>;
+  blocked: (a: string, b: string, sql?: SQL) => Promise<boolean>;
+  revokeSpectators: (ids: string[]) => void;
   start: (ids: string[], game: Game, rules: MatchRules) => Promise<unknown>;
 };
 const rules = z.object({
+  draft: z.boolean().optional(),
   length: z.enum(["quick", "standard", "extended"]),
   spectators: z.boolean(),
 });
@@ -63,8 +70,9 @@ export class Parties {
             username: string;
             accent: string;
             ready: boolean;
+            role: "player" | "spectator";
           }>(
-            "SELECT u.id,u.username,u.accent,m.ready FROM party_members m JOIN users u ON u.id=m.user_id WHERE m.party_id=$1 ORDER BY m.joined_at",
+            "SELECT u.id,u.username,u.accent,m.ready,m.role FROM party_members m JOIN users u ON u.id=m.user_id WHERE m.party_id=$1 ORDER BY m.joined_at",
             [party.id],
           )
         ).rows
@@ -73,6 +81,19 @@ export class Parties {
       party: party
         ? {
             ...party,
+            watching:
+              (
+                await this.db.query(
+                  "SELECT m.id FROM matches m JOIN parties p ON p.match_id=m.id WHERE p.id=$1 AND m.status='active' AND p.rules->>'spectators'='true'",
+                  [party.id],
+                )
+              ).rows.length > 0,
+            messages: (
+              await this.db.query(
+                "SELECT m.id,m.body,m.created_at,u.username FROM party_messages m JOIN users u ON u.id=m.user_id WHERE m.party_id=$1 ORDER BY m.created_at DESC LIMIT 30",
+                [party.id],
+              )
+            ).rows.reverse(),
             members: await Promise.all(
               members.map(async (m) => ({
                 ...m,
@@ -113,8 +134,12 @@ export class Parties {
   }
   private async members(sql: SQL, party: string) {
     return (
-      await sql.query<{ user_id: string; ready: boolean }>(
-        "SELECT user_id,ready FROM party_members WHERE party_id=$1 ORDER BY joined_at",
+      await sql.query<{
+        user_id: string;
+        ready: boolean;
+        role: "player" | "spectator";
+      }>(
+        "SELECT user_id,ready,role FROM party_members WHERE party_id=$1 ORDER BY joined_at",
         [party],
       )
     ).rows;
@@ -155,8 +180,11 @@ export class Parties {
         [a, b],
       )
     ).rows[0];
-    if (party)
+    if (party) {
+      const peers = await this.members(this.db, party.party_id);
       await this.db.query("DELETE FROM parties WHERE id=$1", [party.party_id]);
+      this.changed(...peers.map((p) => p.user_id));
+    }
     await this.db.query(
       "UPDATE party_invites SET status='cancelled' WHERE status='pending' AND ((from_id=$1 AND to_id=$2) OR (from_id=$2 AND to_id=$1))",
       [a, b],
@@ -205,8 +233,8 @@ export class Parties {
           throw Error("Both players must be online and free.");
         if (!(await this.runtime.settings(target, sql)).challenges)
           throw Error("Your friend has paused invitations.");
-        if ((await this.members(sql, p.id)).length >= 2)
-          throw Error("This 1v1 party is full.");
+        if ((await this.members(sql, p.id)).length >= 8)
+          throw Error("This eight-person lobby is full.");
         if (
           (
             await sql.query("SELECT 1 FROM party_members WHERE user_id=$1", [
@@ -268,8 +296,8 @@ export class Parties {
             throw Error("Enable friend invitations in Privacy to join.");
           if (!this.runtime.available(id) || !this.runtime.available(host))
             throw Error("Both players must be online and free.");
-          if ((await this.members(sql, p.id)).length >= 2)
-            throw Error("This party is full.");
+          const existing = await this.members(sql, p.id);
+          if (existing.length >= 8) throw Error("This party is full.");
           if (
             (
               await sql.query("SELECT 1 FROM party_members WHERE user_id=$1", [
@@ -278,9 +306,18 @@ export class Parties {
             ).rows.length
           )
             throw Error("Leave your existing party first.");
+          for (const m of existing)
+            if (await this.runtime.blocked(id, m.user_id, sql))
+              throw Error("This lobby is unavailable.");
           await sql.query(
-            "INSERT INTO party_members(user_id,party_id) VALUES($1,$2)",
-            [id, p.id],
+            "INSERT INTO party_members(user_id,party_id,role) VALUES($1,$2,$3)",
+            [
+              id,
+              p.id,
+              existing.filter((m) => m.role === "player").length < 2
+                ? "player"
+                : "spectator",
+            ],
           );
           await sql.query(
             "UPDATE party_members SET ready=false WHERE party_id=$1",
@@ -294,7 +331,13 @@ export class Parties {
         if (!claim.rows.length)
           throw Error("This invitation was already answered.");
       });
-      this.changed(id, host);
+      const roomPeers = (
+        await this.db.query<{ user_id: string }>(
+          "SELECT user_id FROM party_members WHERE party_id=(SELECT party_id FROM party_members WHERE user_id=$1)",
+          [id],
+        )
+      ).rows;
+      this.changed(id, host, ...roomPeers.map((p) => p.user_id));
       return {};
     });
     event("party:configure", async (data) => {
@@ -303,6 +346,12 @@ export class Parties {
         .parse(data);
       const peers = await this.db.transaction(async (sql) => {
         const p = await this.room(sql, id, true);
+        if (
+          (await this.members(sql, p.id)).some(
+            (m) => m.role === "player" && !this.runtime.available(m.user_id),
+          )
+        )
+          throw Error("Wait until the current match or search finishes.");
         if (
           input.rules.spectators &&
           (input.game === "any" || !watchableGames.includes(input.game))
@@ -315,6 +364,69 @@ export class Parties {
         ]);
         await sql.query(
           "UPDATE party_members SET ready=false WHERE party_id=$1",
+          [p.id],
+        );
+        return this.members(sql, p.id);
+      });
+      this.changed(...peers.map((p) => p.user_id));
+      return {};
+    });
+    event("party:seat", async (data) => {
+      const { target, role } = z
+        .object({
+          target: z.string().uuid(),
+          role: z.enum(["player", "spectator"]),
+        })
+        .parse(data);
+      const peers = await this.db.transaction(async (sql) => {
+        const p = await this.room(sql, id, true),
+          members = await this.members(sql, p.id);
+        if (!members.some((m) => m.user_id === target))
+          throw Error("Player is not in this lobby.");
+        if (
+          members.some(
+            (m) => m.role === "player" && !this.runtime.available(m.user_id),
+          )
+        )
+          throw Error("Wait until the current match or search finishes.");
+        if (
+          role === "player" &&
+          members.filter((m) => m.role === "player" && m.user_id !== target)
+            .length >= 2
+        )
+          throw Error(
+            "Move a player to a spectator seat first. Games remain 1v1.",
+          );
+        await sql.query(
+          "UPDATE party_members SET role=$1 WHERE user_id=$2 AND party_id=$3",
+          [role, target, p.id],
+        );
+        await sql.query(
+          "UPDATE party_members SET ready=false WHERE party_id=$1",
+          [p.id],
+        );
+        return members;
+      });
+      this.runtime.revokeSpectators(peers.map((p) => p.user_id));
+      this.changed(...peers.map((p) => p.user_id));
+      return {};
+    });
+    event("party:message", async (data) => {
+      const input = z
+        .object({
+          id: z.string().uuid(),
+          body: z.string().trim().min(1).max(600),
+        })
+        .parse(data);
+      const peers = await this.db.transaction(async (sql) => {
+        const p = await this.room(sql, id);
+        await this.limit(sql, id, "party-message", 15);
+        await sql.query(
+          "INSERT INTO party_messages(id,party_id,user_id,body) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+          [input.id, p.id, id, input.body],
+        );
+        await sql.query(
+          "DELETE FROM party_messages WHERE party_id=$1 AND id NOT IN(SELECT id FROM party_messages WHERE party_id=$1 ORDER BY created_at DESC LIMIT 100)",
           [p.id],
         );
         return this.members(sql, p.id);
@@ -340,13 +452,24 @@ export class Parties {
     event("party:launch", async () => {
       const claimed = await this.db.transaction(async (sql) => {
         const p = await this.room(sql, id, true),
-          members = await this.members(sql, p.id);
+          everyone = await this.members(sql, p.id),
+          members = everyone.filter((m) => m.role === "player");
         if (
           members.length !== 2 ||
           members.some((m) => !m.ready || !this.runtime.available(m.user_id))
         )
           throw Error("Both party members must be online, free and ready.");
-        await this.runtime.friend(members[0].user_id, members[1].user_id, sql);
+        for (const m of members)
+          if (m.user_id !== p.host_id)
+            await this.runtime.friend(p.host_id, m.user_id, sql);
+        if (
+          await this.runtime.blocked(
+            members[0].user_id,
+            members[1].user_id,
+            sql,
+          )
+        )
+          throw Error("These players cannot be matched.");
         if (p.rules.spectators)
           for (const m of members)
             if (!(await this.runtime.settings(m.user_id, sql)).spectators)
@@ -356,19 +479,28 @@ export class Parties {
           "UPDATE party_members SET ready=false WHERE party_id=$1",
           [p.id],
         );
-        return { p, ids: members.map((m) => m.user_id) };
+        return {
+          p,
+          ids: members.map((m) => m.user_id),
+          everyone: everyone.map((m) => m.user_id),
+        };
       });
       try {
-        await this.runtime.start(
+        const launched = (await this.runtime.start(
           claimed.ids,
           claimed.p.game === "any"
             ? games[randomInt(games.length)]
             : claimed.p.game,
           claimed.p.rules,
-        );
+        )) as { state?: { id?: string } } | undefined;
+        if (launched?.state?.id)
+          await this.db.query("UPDATE parties SET match_id=$1 WHERE id=$2", [
+            launched.state.id,
+            claimed.p.id,
+          ]);
       } finally {
         this.starting.delete(claimed.p.id);
-        this.changed(...claimed.ids);
+        this.changed(...claimed.everyone);
       }
       return {};
     });
@@ -387,6 +519,7 @@ export class Parties {
         }
         return members;
       });
+      this.runtime.revokeSpectators(peers.map((p) => p.user_id));
       this.changed(...peers.map((p) => p.user_id));
       return {};
     });
@@ -408,6 +541,7 @@ export class Parties {
         );
         return members;
       });
+      this.runtime.revokeSpectators(peers.map((p) => p.user_id));
       this.changed(...peers.map((p) => p.user_id));
       return {};
     });
@@ -421,8 +555,8 @@ export class Parties {
         if (!(await this.runtime.settings(target, sql)).challenges)
           throw Error("Your friend has paused invitations.");
         const t = (
-          await sql.query<{ name: string }>(
-            "SELECT t.name FROM tournaments t JOIN entrants e ON e.tournament_id=t.id AND e.user_id=$1 WHERE t.id=$2 AND t.status='open' FOR UPDATE OF t",
+          await sql.query<{ name: string; capacity: number }>(
+            "SELECT t.name,t.capacity FROM tournaments t JOIN entrants e ON e.tournament_id=t.id AND e.user_id=$1 WHERE t.id=$2 AND t.status='open' FOR UPDATE OF t",
             [id, tournamentId],
           )
         ).rows[0];
@@ -435,7 +569,10 @@ export class Parties {
             [tournamentId],
           )
         ).rows;
-        if (entries.length >= 4 || entries.some((e) => e.user_id === target))
+        if (
+          entries.length >= t.capacity ||
+          entries.some((e) => e.user_id === target)
+        )
           throw Error("The tournament is full or your friend already joined.");
         await this.limit(sql, id, "tournament-invites");
         await sql.query(
@@ -480,8 +617,8 @@ export class Parties {
         sender = i.from_id;
         await this.runtime.friend(id, sender, sql);
         const t = (
-          await sql.query<{ status: string }>(
-            "SELECT status FROM tournaments WHERE id=$1 FOR UPDATE",
+          await sql.query<{ status: string; capacity: number }>(
+            "SELECT status,capacity FROM tournaments WHERE id=$1 FOR UPDATE",
             [i.tournament_id],
           )
         ).rows[0];
@@ -497,7 +634,8 @@ export class Parties {
             )
           ).rows;
           if (!entries.some((e) => e.user_id === id)) {
-            if (entries.length >= 4) throw Error("The tournament is full.");
+            if (entries.length >= t.capacity)
+              throw Error("The tournament is full.");
             await sql.query(
               "INSERT INTO entrants(tournament_id,user_id) VALUES($1,$2)",
               [i.tournament_id, id],

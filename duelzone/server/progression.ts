@@ -59,7 +59,32 @@ export async function awardProgress(sql: SQL, state: MatchState) {
     ).rows;
     const c = state.competition,
       runner = c?.players[id];
+    const previousBest = (
+      await sql.query<{ best: number | null }>(
+        "SELECT max(r.score)::int AS best FROM results r JOIN matches m ON m.id=r.match_id WHERE r.user_id=$1 AND m.game=$2 AND m.status='finished' AND m.reason='Score' AND m.id<>$3",
+        [id, state.game, state.id],
+      )
+    ).rows[0].best;
+    const gameWins = (
+      await sql.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM matches WHERE game=$1 AND winner_id=$2 AND status='finished' AND reason='Score'",
+        [state.game, id],
+      )
+    ).rows[0].n;
     const candidates = [
+      ...(state.mode === "ranked" && state.winner === id
+        ? ["first-ranked"]
+        : []),
+      ...(gameWins >= 10 ? ["game-ten"] : []),
+      ...(previousBest !== null && state.scores[id] > previousBest
+        ? ["personal-best"]
+        : []),
+      ...(state.game === "showdown" &&
+      state.winner === id &&
+      state.frontier?.history.length &&
+      state.frontier.history.every((r) => r.winner === id)
+        ? ["clean-sweep"]
+        : []),
       ...(state.winner === id ? ["first-win"] : []),
       ...(featuredGames.every((game) => stats.some((row) => row.game === game))
         ? ["versatile"]
@@ -198,4 +223,30 @@ export async function weeklyProgress(sql: SQL, id: string) {
       complete: claims.some((c) => c.goal === g.id),
     })),
   };
+}
+
+export async function grantAchievement(
+  sql: SQL,
+  id: string,
+  achievement: string,
+) {
+  const definition = ACHIEVEMENTS.find((a) => a.id === achievement);
+  if (!definition) throw Error("Unknown achievement");
+  const added = await sql.query(
+    "INSERT INTO achievements(user_id,id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING id",
+    [id, achievement],
+  );
+  if (!added.rows.length) return;
+  await sql.query(
+    "INSERT INTO progression(user_id,xp) VALUES($1,100) ON CONFLICT(user_id) DO UPDATE SET xp=progression.xp+100",
+    [id],
+  );
+  await putNotification(
+    sql,
+    id,
+    "achievement",
+    "Unlocked " + definition.name + ".",
+    undefined,
+    "achievement:" + achievement,
+  );
 }

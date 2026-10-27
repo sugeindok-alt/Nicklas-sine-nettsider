@@ -6,7 +6,14 @@ import "./social.css";
 import "./frontier.css";
 import "./platform.css";
 import "./identity.css";
+import "./evolution.css";
 export const metadata: Metadata = {
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "DuelZone",
+    statusBarStyle: "black-translucent",
+  },
   title: "DuelZone — Find your next rivalry.",
   description:
     "Physics, tactics and skill. Challenge friends, compete in Showdown and find your edge on DuelZone.",

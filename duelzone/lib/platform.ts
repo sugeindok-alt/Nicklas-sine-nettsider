@@ -15,7 +15,18 @@ export type Party = {
   host_id: string;
   game: Game | "any";
   rules: MatchRules;
-  members: (Player & { ready: boolean; online: boolean })[];
+  members: (Player & {
+    ready: boolean;
+    online: boolean;
+    role: "player" | "spectator";
+  })[];
+  watching: boolean;
+  messages: {
+    id: string;
+    username: string;
+    body: string;
+    created_at: string;
+  }[];
 };
 export type PartyInvite = {
   id: string;

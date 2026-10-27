@@ -20,7 +20,9 @@
     "format": "prettier --write app components lib server tests",
     "test:frontier": "tsx tests/frontier-integration.ts",
     "test:platform": "tsx tests/platform-integration.ts",
-    "reports": "tsx scripts/reports.ts"
+    "reports": "tsx scripts/reports.ts",
+    "test:evolution": "tsx tests/evolution-integration.ts",
+    "feedback": "tsx scripts/feedback.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",

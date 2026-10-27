@@ -193,7 +193,10 @@ try {
   for (const c of clients) {
     const activeMs = Math.min(8500, (c.finishedAt ?? Date.now()) - start),
       expectedFrames = Math.floor((activeMs / 100) * 0.75);
-    assert(activeMs >= 2000, "movement must be observed for at least two seconds");
+    assert(
+      activeMs >= 2000,
+      "movement must be observed for at least two seconds",
+    );
     assert(
       c.frames >= expectedFrames,
       `${c.frames} frames during ${activeMs}ms; expected at least ${expectedFrames}`,
@@ -247,7 +250,7 @@ try {
   assert.equal((await request("/overview")).data.completed, completed);
   assert.equal((await request("/overview")).data.online, 2);
   await assert.rejects(
-    command(a, "ai:start", { game: "reaction", difficulty: "expert" }),
+    command(a, "ai:start", { game: "not-a-game", difficulty: "expert" }),
   );
   await command(a, "queue:join", { game: "any", mode: "casual" });
   a.socket.disconnect();
