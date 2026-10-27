@@ -47,7 +47,7 @@ export function Installable({ busy }: { busy: boolean }) {
       navigator.serviceWorker?.removeEventListener("controllerchange", changed);
     };
   }, []);
-  if (!waiting && (!install || dismissed)) return null;
+  if (busy || (!waiting && (!install || dismissed))) return null;
   return (
     <aside className="install-banner">
       <div>
