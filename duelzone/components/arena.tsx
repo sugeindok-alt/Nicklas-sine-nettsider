@@ -1,5 +1,12 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { FrontierField, FrontierPractice, SeriesRecap } from "./frontier-field";
+import { isFrontier } from "@/lib/frontier";
+import { FeedbackButton } from "./community-tools";
+import { Brand } from "./brand";
+import { MatchIntro } from "./match-intro";
+import { AnimatedNumber } from "./animated-number";
+import { matchFeed } from "@/lib/match-feed";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,15 +16,21 @@ import {
   Target,
   Trophy,
   Zap,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   GAME_INFO,
   markerPosition,
+  isCompetition,
   type MatchState,
   type Game,
 } from "@/lib/shared";
 import type { Action } from "@/server/game";
+import { CompetitionField, CompetitionPractice } from "./competition-field";
+import { ACHIEVEMENTS } from "@/lib/progression";
+import { setSound, soundEnabled, tone, unlockSound } from "@/lib/sound";
 const inkColors: Record<string, string> = {
   BLUE: "#a5bce9",
   CORAL: "#e8b39a",
@@ -62,6 +75,7 @@ export function Playfield({
   submitRef.current = submit;
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (document.querySelector(".social-panel")) return;
       if (event.repeat || event.target instanceof HTMLInputElement) return;
       if (
         (state.game === "reaction" || state.game === "precision") &&
@@ -249,7 +263,7 @@ export function Playfield({
   );
 }
 
-export default function Arena({
+function Arena({
   state,
   userId,
   onAction,
@@ -267,6 +281,15 @@ export default function Arena({
   connected: boolean;
 }) {
   const [confirm, setConfirm] = useState(false);
+  const [audio, setAudio] = useState(true);
+  const announced = useRef("");
+  useEffect(() => setAudio(soundEnabled()), []);
+  useEffect(() => {
+    if (state.phase === "finished" && announced.current !== state.id) {
+      announced.current = state.id;
+      tone(state.winner === userId ? "win" : "loss");
+    }
+  }, [state.phase, state.id, state.winner, userId]);
   const arenaRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -288,16 +311,41 @@ export default function Arena({
       tabIndex={-1}
       role="dialog"
       aria-modal="true"
-      aria-label="Live multiplayer match"
+      aria-label={
+        state.mode === "ai"
+          ? "AI practice match"
+          : state.mode === "ghost"
+            ? "Recorded ghost challenge"
+            : "Live multiplayer match"
+      }
     >
       <div className="arena-wrap">
         <header className="arena-header">
           <div className="wordmark">
-            <span className="brand-symbol">◩</span>DUELZONE
+            <Brand />
             <span className="divider" />
             <span className="muted">{GAME_INFO[state.game].name}</span>
           </div>
-          <span className="mode-chip">{state.mode}</span>
+          <span className="mode-chip">
+            {state.mode === "ai"
+              ? "AI PRACTICE · BOT"
+              : state.mode === "ghost"
+                ? "RECORDED GHOST · TRAINING"
+                : state.mode}
+          </span>
+          <div id="arena-social-anchor" />
+          <button
+            className="icon-button sound-toggle"
+            aria-label={audio ? "Mute sound" : "Enable sound"}
+            aria-pressed={audio}
+            onClick={() => {
+              setSound(!audio);
+              setAudio(!audio);
+              unlockSound();
+            }}
+          >
+            {audio ? <Volume2 size={18} /> : <VolumeX size={18} />}
+          </button>
           {finished ? (
             <button className="text-button" onClick={onClose}>
               Back to arena <ArrowRight size={16} />
@@ -351,11 +399,23 @@ export default function Arena({
               </div>
               <div>
                 <span className="eyebrow">
-                  {p.id === userId ? "YOU" : "OPPONENT"}
+                  {p.bot
+                    ? "AI OPPONENT · BOT"
+                    : p.id === userId
+                      ? "YOU"
+                      : "OPPONENT"}
                 </span>
                 <h2>{p.username}</h2>
               </div>
-              <strong>{state.scores[p.id].toLocaleString()}</strong>
+              <strong>
+                <AnimatedNumber
+                  value={
+                    state.game === "showdown"
+                      ? state.scores[p.id] / 2
+                      : state.scores[p.id]
+                  }
+                />
+              </strong>
               {i === 0 && <div className="versus">VS</div>}
             </div>
           ))}
@@ -363,30 +423,46 @@ export default function Arena({
         <AnimatePresence mode="wait">
           {finished ? (
             <motion.div
-              className="match-results"
+              className={`match-results ${won ? "victory" : tie ? "draw" : "defeat"}`}
+              data-finish={
+                state.players.find((p) => p.id === userId)?.cosmetic ||
+                "graphite"
+              }
               key="results"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
             >
               <div className={`result-emblem ${won ? "won" : ""}`}>
-                <Trophy size={48} strokeWidth={1} />
+                {won ? (
+                  <Trophy size={48} strokeWidth={1} />
+                ) : (
+                  <Target size={48} strokeWidth={1} />
+                )}
               </div>
+              {won && (
+                <div className="victory-lines" aria-hidden="true">
+                  {Array.from({ length: 8 }, (_, i) => (
+                    <i
+                      key={i}
+                      style={{ "--line-index": i } as React.CSSProperties}
+                    />
+                  ))}
+                </div>
+              )}
               <span className="eyebrow">
-                {state.reason === "Score" ? "MATCH COMPLETE" : state.reason}
+                {state.reason === "Score"
+                  ? "MATCH COMPLETE"
+                  : state.reason === "Opponent left the match" && !won
+                    ? "You left the match"
+                    : state.reason}
               </span>
-              <h1>
-                {tie
-                  ? "Perfectly matched."
-                  : won
-                    ? "That’s your win."
-                    : "The next one is yours."}
-              </h1>
+              <h1>{tie ? "A draw." : won ? "Victory." : "Defeat."}</h1>
               <p>
                 {tie
                   ? "Even on points. Settle it with a rematch."
                   : won
-                    ? "Small margins. A well-earned victory."
-                    : "Every match is a chance to find your edge."}
+                    ? "Well played. Ready to defend it?"
+                    : "A new round. Another chance."}
               </p>
               {state.mode === "ranked" && (
                 <div className="rating-result">
@@ -395,6 +471,28 @@ export default function Arena({
                   <span>RATING POINTS</span>
                 </div>
               )}
+              {state.rewards?.[userId] && (
+                <div className="earned-rewards">
+                  <strong>+{state.rewards[userId].xp} XP</strong>
+                  {state.rewards[userId].daily.length > 0 && (
+                    <span>
+                      {state.rewards[userId].daily.length} daily challenge
+                      {state.rewards[userId].daily.length > 1 ? "s" : ""}{" "}
+                      completed
+                    </span>
+                  )}
+                  {state.rewards[userId].achievements.map((id) => (
+                    <span className="achievement-earned" key={id}>
+                      <Trophy size={14} />
+                      {ACHIEVEMENTS.find((a) => a.id === id)?.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {state.frontier && (
+                <SeriesRecap view={state.frontier} players={state.players} />
+              )}
+              <FeedbackButton match={state} />
               <div className="result-actions">
                 {state.mode !== "tournament" && (
                   <button
@@ -422,16 +520,43 @@ export default function Arena({
               )}
               <div className="saved-note">
                 <Check size={14} />
-                Result saved to your profile
+                {state.mode === "ghost"
+                  ? "Ghost training saved · no ranked points or mastery rewards"
+                  : state.mode === "ai"
+                    ? "AI training saved · no ranked points or mastery rewards"
+                    : "Result saved to your profile"}
               </div>
             </motion.div>
+          ) : state.phase === "intro" ? (
+            <MatchIntro key={state.id} state={state} userId={userId} />
           ) : (
             <motion.div
               key="field"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <Playfield state={state} userId={userId} onAction={onAction} />
+              {state.frontier ? (
+                <FrontierField
+                  state={state}
+                  userId={userId}
+                  onAction={onAction}
+                />
+              ) : state.competition ? (
+                <CompetitionField
+                  state={state}
+                  userId={userId}
+                  onAction={onAction}
+                />
+              ) : (
+                <Playfield
+                  state={state}
+                  userId={userId}
+                  onAction={(action) => {
+                    unlockSound();
+                    onAction(action);
+                  }}
+                />
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -451,7 +576,16 @@ export default function Arena({
   );
 }
 
-export function Practice({
+export function Practice(props: { game: Game; onClose: () => void }) {
+  return isFrontier(props.game) ? (
+    <FrontierPractice {...props} />
+  ) : isCompetition(props.game) ? (
+    <CompetitionPractice {...props} />
+  ) : (
+    <ClassicPractice {...props} />
+  );
+}
+function ClassicPractice({
   game,
   onClose,
 }: {
@@ -629,5 +763,19 @@ export function Practice({
         <Playfield state={state} userId="you" onAction={action} practice />
       )}
     </div>
+  );
+}
+
+export default function LiveArena(props: React.ComponentProps<typeof Arena>) {
+  const live = useSyncExternalStore(
+    matchFeed.subscribe,
+    matchFeed.get,
+    () => null,
+  );
+  return (
+    <Arena
+      {...props}
+      state={live?.id === props.state.id ? live : props.state}
+    />
   );
 }

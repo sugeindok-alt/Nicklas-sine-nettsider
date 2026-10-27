@@ -1,0 +1,295 @@
+.button {
+  transition:
+    transform 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.button:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+}
+.ai-entry {
+  margin-top: 18px;
+  color: #d5dce5;
+  gap: 9px;
+}
+.ai-entry > span {
+  color: #8d949e;
+  font-size: 11px;
+  font-weight: 400;
+}
+.ai-picker {
+  display: grid;
+  gap: 24px;
+}
+.ai-picker > p {
+  line-height: 1.7;
+  font-size: 13px;
+}
+.ai-game-label {
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+}
+.ai-game-label select {
+  padding: 14px;
+  border: 1px solid #353a40;
+  border-radius: 4px;
+  background: #171b1f;
+  color: #eef0f4;
+}
+.difficulty-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.difficulty-grid button {
+  text-align: left;
+  padding: 16px;
+  border: 1px solid #30363c;
+  background: #13171a;
+  border-radius: 4px;
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
+}
+.difficulty-grid button:hover {
+  border-color: #7b878f;
+  transform: translateY(-2px);
+}
+.difficulty-grid button.selected {
+  border-color: #b8d67a;
+  background: #1c2317;
+}
+.difficulty-grid button > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: capitalize;
+  font-size: 13px;
+}
+.difficulty-grid button > span > svg:last-child {
+  margin-left: auto;
+}
+.difficulty-grid small {
+  display: block;
+  margin-top: 9px;
+  color: #a0a8b0;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.queue-disciplines {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  margin: 18px 0 8px;
+}
+.queue-disciplines span {
+  padding: 6px 9px;
+  background: #191e20;
+  border: 1px solid #30393d;
+  color: #aab8bd;
+  font-size: 10px;
+  animation: queue-scan 3s ease-in-out infinite;
+}
+.queue-disciplines span:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.queue-disciplines span:nth-child(3) {
+  animation-delay: 0.6s;
+}
+.queue-disciplines span:nth-child(4) {
+  animation-delay: 0.9s;
+}
+.queue-disciplines span:nth-child(5) {
+  animation-delay: 1.2s;
+}
+@keyframes queue-scan {
+  0%,
+  70%,
+  100% {
+    border-color: #30393d;
+    color: #879198;
+  }
+  35% {
+    border-color: #8ca94e;
+    color: #dce9c7;
+  }
+}
+.match-intro {
+  padding: 36px 20px;
+  min-height: 410px;
+  text-align: center;
+  border: 1px solid #30363c;
+  background: #111517;
+  position: relative;
+  overflow: hidden;
+}
+.match-intro > .eyebrow {
+  color: #c8f36a;
+}
+.intro-players {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 28px auto;
+  max-width: 650px;
+}
+.intro-players > div {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.intro-avatar {
+  width: 80px;
+  height: 80px;
+  border: 1px solid;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  background: #ffffff04;
+  transform: skew(-4deg);
+}
+.intro-players strong {
+  font-weight: 500;
+  font-size: 18px;
+  max-width: 95%;
+  overflow-wrap: anywhere;
+}
+.intro-players small {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: #8d99a3;
+  text-transform: uppercase;
+}
+.intro-vs {
+  position: absolute;
+  left: calc(100% - 14px);
+  top: 29px;
+  font-style: italic;
+  color: #64716d;
+  font-size: 20px;
+}
+.match-intro h2 {
+  font-size: 22px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.match-intro p {
+  color: #8f99a2;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.intro-count {
+  font-size: 42px;
+  color: #c8f36a;
+  font-weight: 400;
+  margin-top: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.intro-timeline {
+  height: 2px;
+  background: #ffffff08;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+}
+.intro-timeline i {
+  display: block;
+  height: 100%;
+  background: #c8f36a;
+  transform-origin: left;
+  animation: intro-progress 2.4s linear both;
+}
+@keyframes intro-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.rank-track > div {
+  transition: width 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.capture-grid > button {
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    transform 0.12s;
+}
+.capture-grid > button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+.board-table tbody tr {
+  transition: background 0.2s;
+}
+.board-table tbody tr:hover {
+  background: #ffffff03;
+}
+.match-results.defeat .result-emblem {
+  animation: settle-emblem 0.6s ease-out both;
+}
+.match-results.victory .result-emblem {
+  animation: win-emblem 0.6s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+@keyframes settle-emblem {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes win-emblem {
+  from {
+    opacity: 0;
+    transform: scale(0.75) rotate(-8deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+@media (max-width: 600px) {
+  .match-intro {
+    padding: 24px 12px;
+    min-height: 380px;
+  }
+  .intro-avatar {
+    width: 60px;
+    height: 60px;
+  }
+  .intro-players strong {
+    font-size: 13px;
+  }
+  .intro-vs {
+    top: 20px;
+  }
+  .difficulty-grid button {
+    padding: 12px;
+  }
+  .ai-entry {
+    font-size: 12px;
+  }
+  .ai-entry > span {
+    font-size: 9px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *:before,
+  *:after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .difficulty-grid button:hover {
+    transform: none;
+  }
+}

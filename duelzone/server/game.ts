@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
+import type { CompetitionAction } from "../lib/competition";
 import {
   GAME_INFO,
   markerPosition,
@@ -9,12 +10,13 @@ import {
   type Challenge,
 } from "../lib/shared";
 
-export type Action = {
-  challengeId: string;
-  x?: number;
-  y?: number;
-  choice?: number;
-};
+export type Action = CompetitionAction &
+  Partial<import("../lib/frontier").Control> & {
+    challengeId: string;
+    x?: number;
+    y?: number;
+    choice?: number;
+  };
 export function scoreAction(
   game: Game,
   challenge: Challenge,
@@ -70,7 +72,7 @@ export class Match {
     players: Player[],
     game: Game,
     mode: Mode,
-    private broadcast: (state: MatchState) => void,
+    protected broadcast: (state: MatchState) => void,
     private settle: (state: MatchState) => Promise<Record<string, number>>,
     private completed?: (match: Match) => Promise<void>,
     private timing = 1,
@@ -94,7 +96,7 @@ export class Match {
       rematch: [],
     };
   }
-  snapshot() {
+  snapshot(_viewer?: string) {
     return { ...this.state, serverNow: Date.now() };
   }
   private emit() {

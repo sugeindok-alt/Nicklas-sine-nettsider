@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: duelzone-nicklas
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: feat/duelzone-gameplay
+    rootDir: duelzone
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: '10000'
+      - key: TRUST_PROXY_HOPS
+        value: '1'
+      - key: DATABASE_URL
+        sync: false
